@@ -1,0 +1,15 @@
+.git
+.github
+dist
+bin
+*.md
+!README.md
+web/node_modules
+web/.vite
+internal/webui/dist/assets
+scratch_cfg
+scratch_lib
+*.db
+*.db-shm
+*.db-wal
+.goreleaser.yaml

@@ -1,0 +1,252 @@
+{
+  "product_filters": [],
+  "products": [
+    {
+      "asin": "B0B4PZWGT6",
+      "asset_details": [],
+      "authors": [
+        {
+          "asin": "B001H6W4PU",
+          "name": "Jack Campbell"
+        }
+      ],
+      "available_codecs": [
+        {
+          "enhanced_codec": "LC_64_22050_stereo",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "aax_22_64"
+        },
+        {
+          "enhanced_codec": "format4",
+          "format": "Format4",
+          "is_kindle_enhanced": false,
+          "name": "format4"
+        },
+        {
+          "enhanced_codec": "LC_128_44100_stereo",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "aax_44_128"
+        },
+        {
+          "enhanced_codec": "LC_32_22050_stereo",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "aax_22_32"
+        },
+        {
+          "enhanced_codec": "LC_64_44100_stereo",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "aax_44_64"
+        },
+        {
+          "enhanced_codec": "mp444128",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "mp4_44_128"
+        },
+        {
+          "enhanced_codec": "mp42264",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "mp4_22_64"
+        },
+        {
+          "enhanced_codec": "mp42232",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "mp4_22_32"
+        },
+        {
+          "enhanced_codec": "mp44464",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "mp4_44_64"
+        },
+        {
+          "enhanced_codec": "aax",
+          "format": "Enhanced",
+          "is_kindle_enhanced": false,
+          "name": "aax"
+        }
+      ],
+      "content_delivery_type": "SinglePartBook",
+      "content_type": "Product",
+      "format_type": "unabridged",
+      "has_children": false,
+      "is_adult_product": false,
+      "is_listenable": true,
+      "is_purchasability_suppressed": false,
+      "is_vvab": false,
+      "issue_date": "2022-06-23",
+      "language": "english",
+      "merchandising_summary": "The Alliance has been fighting the Syndics for a century—and losing badly. Now its fleet is crippled and stranded in enemy territory. Their only hope is a man who’s emerged from a century-long hibernation to find he has been heroically idealized beyond belief… Captain John “Black Jack”...",
+      "narrators": [
+        {
+          "name": "Jack Campbell"
+        },
+        {
+          "name": "Christian Rummel"
+        }
+      ],
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51EBJ8tRfmL._SL500_.jpg"
+      },
+      "publication_datetime": "2022-06-23T11:19:00Z",
+      "publication_name": "Lost Fleet",
+      "publisher_name": "Recorded Books",
+      "release_date": "2022-06-23",
+      "runtime_length_min": 595,
+      "series": [
+        {
+          "asin": "B006K1S7IU",
+          "sequence": "1",
+          "title": "Lost Fleet",
+          "url": "/pd/Lost-Fleet-Audiobook/B006K1S7IU"
+        }
+      ],
+      "sku": "BK_RECO_017027",
+      "sku_lite": "BK_RECO_017027",
+      "social_media_images": {
+        "facebook": "https://m.media-amazon.com/images/I/51EBJ8tRfmL._SL10_UR1600,800_CR200,50,1200,630_CLa%7C1200,630%7C51EBJ8tRfmL.jpg%7C0,0,1200,630+82,82,465,465_PJAdblSocialShare-Gradientoverlay-largeasin-0to70,TopLeft,0,0_PJAdblSocialShare-AudibleLogo-Large,TopLeft,600,270_OU01_ZBLISTENING%20ON,617,216,52,500,AudibleSansMd,30,255,255,255.jpg",
+        "ig_bg": "https://m.media-amazon.com/images/I/51EBJ8tRfmL._SL200_BL80_UR1080,2160.jpg",
+        "ig_static_with_bg": "https://m.media-amazon.com/images/I/51EBJ8tRfmL._SL200_BL80_UR1080,2160_CLa%7C1080,2160%7C51EBJ8tRfmL.jpg%7C0,0,1080,2160+288,614,500,500_PJAdblSocialShare-Gradientoverlay-Radial,TopLeft,0,0_PJAdblSocialShare-AudibleLogo-Small,TopLeft,290,461_ZBLISTENING%20ON,290,410,52,500,AudibleSansMd,34,255,255,255_ZBDauntless,290,1183,52,500,AudibleSansSm,32,255,255,255_ZBJack%20Campbell,290,1247,52,500,AudibleSansRg,28,255,255,255.jpg",
+        "ig_sticker": "https://m.media-amazon.com/images/I/71UyRin7-TL._CLa%7C614,913%7C51EBJ8tRfmL.jpg%7C0,0,614,913+70,79,471,473_FMpng_PJAudible-logo-dk,BottomLeft,70,-100_ZADauntless,70,560,65,500,AudibleSansSm,42,54,54,54_ZAby%20Jack%20Campbell,70,640,52,517,AudibleSansRg,32,0,0,0.png",
+        "twitter": "https://m.media-amazon.com/images/I/51EBJ8tRfmL._SL10_UR1600,800_CR200,50,1024,512_CLa%7C1024,512%7C51EBJ8tRfmL.jpg%7C0,0,1024,512+67,67,376,376_PJAdblSocialShare-Gradientoverlay-twitter-largeasin-0to60,TopLeft,0,0_PJAdblSocialShare-AudibleLogo-Medium,TopLeft,490,223_OU01_ZBLISTENING%20ON,483,152,55,450,AudibleSansMd,32,255,255,255.jpg"
+      },
+      "subtitle": "Lost Fleet, Book 1",
+      "title": "Dauntless"
+    },
+    {
+      "asin": "B0GNTHKX9H",
+      "asset_details": [],
+      "authors": [
+        {
+          "name": "Jack Campbell"
+        }
+      ],
+      "available_codecs": [
+        {
+          "enhanced_codec": "LC_64_22050_stereo",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "aax_22_64"
+        },
+        {
+          "enhanced_codec": "LC_64_44100_stereo",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "aax_44_64"
+        },
+        {
+          "enhanced_codec": "LC_32_22050_stereo",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "aax_22_32"
+        },
+        {
+          "enhanced_codec": "LC_128_44100_stereo",
+          "format": "Enhanced",
+          "is_kindle_enhanced": true,
+          "name": "aax_44_128"
+        },
+        {
+          "enhanced_codec": "aax",
+          "format": "Enhanced",
+          "is_kindle_enhanced": false,
+          "name": "aax"
+        }
+      ],
+      "content_delivery_type": "SinglePartBook",
+      "content_type": "Performance",
+      "format_type": "original_recording",
+      "has_children": false,
+      "is_adult_product": false,
+      "is_listenable": true,
+      "is_purchasability_suppressed": false,
+      "is_vvab": false,
+      "issue_date": "2026-02-17",
+      "language": "english",
+      "merchandising_summary": "<p>The Alliance has been fighting the Syndics for a century—and losing badly. Now its fleet is crippled and stranded in enemy territory. Their only hope is a man who's emerged from a century-long hibernation to find he has been heroically idealized beyond belief....</p>",
+      "narrators": [
+        {
+          "name": "full cast"
+        },
+        {
+          "name": "Marlon Dance-Hooi"
+        },
+        {
+          "name": "Gerald Hill"
+        },
+        {
+          "name": "Kymberley Cochrane"
+        },
+        {
+          "name": "Zura Johnson"
+        },
+        {
+          "name": "Matthew Pauli"
+        },
+        {
+          "name": "Zoleka Vundla"
+        },
+        {
+          "name": "Andrew Quilpa"
+        },
+        {
+          "name": "Jonathan Lee Taylor"
+        },
+        {
+          "name": "Debi Tinsley"
+        },
+        {
+          "name": "Todd Scofield"
+        },
+        {
+          "name": "Yasmin Tuazon"
+        }
+      ],
+      "product_images": {
+        "500": "https://m.media-amazon.com/images/I/51-IG2Lh+GL._SL500_.jpg"
+      },
+      "publication_datetime": "2026-02-17T23:07:00Z",
+      "publication_name": "Lost Fleet",
+      "publisher_name": "Graphic Audio LLC",
+      "release_date": "2026-02-17",
+      "runtime_length_min": 504,
+      "series": [
+        {
+          "asin": "B006K1S7IU",
+          "sequence": "1",
+          "title": "Lost Fleet",
+          "url": "/pd/Lost-Fleet-Audiobook/B006K1S7IU"
+        }
+      ],
+      "sku": "BK_GRPH_005303",
+      "sku_lite": "BK_GRPH_005303",
+      "social_media_images": {
+        "facebook": "https://m.media-amazon.com/images/I/51-IG2Lh+GL._SL10_UR1600,800_CR200,50,1200,630_CLa%7C1200,630%7C51-IG2Lh+GL.jpg%7C0,0,1200,630+82,82,465,465_PJAdblSocialShare-Gradientoverlay-largeasin-0to70,TopLeft,0,0_PJAdblSocialShare-AudibleLogo-Large,TopLeft,600,270_OU01_ZBLISTENING%20ON,617,216,52,500,AudibleSansMd,30,255,255,255.jpg",
+        "ig_bg": "https://m.media-amazon.com/images/I/51-IG2Lh+GL._SL200_BL80_UR1080,2160.jpg",
+        "ig_static_with_bg": "https://m.media-amazon.com/images/I/51-IG2Lh+GL._SL200_BL80_UR1080,2160_CLa%7C1080,2160%7C51-IG2Lh+GL.jpg%7C0,0,1080,2160+288,614,500,500_PJAdblSocialShare-Gradientoverlay-Radial,TopLeft,0,0_PJAdblSocialShare-AudibleLogo-Small,TopLeft,290,461_ZBLISTENING%20ON,290,410,52,500,AudibleSansMd,34,255,255,255_ZBDauntless%20%28Dramatized%20A...,290,1183,52,500,AudibleSansSm,32,255,255,255_ZBJack%20Campbell,290,1247,52,500,AudibleSansRg,28,255,255,255.jpg",
+        "ig_sticker": "https://m.media-amazon.com/images/I/71UyRin7-TL._CLa%7C614,913%7C51-IG2Lh+GL.jpg%7C0,0,614,913+70,79,471,473_FMpng_PJAudible-logo-dk,BottomLeft,70,-100_ZADauntless%20%28Dram...,70,560,65,500,AudibleSansSm,42,54,54,54_ZAby%20Jack%20Campbell,70,640,52,517,AudibleSansRg,32,0,0,0.png",
+        "twitter": "https://m.media-amazon.com/images/I/51-IG2Lh+GL._SL10_UR1600,800_CR200,50,1024,512_CLa%7C1024,512%7C51-IG2Lh+GL.jpg%7C0,0,1024,512+67,67,376,376_PJAdblSocialShare-Gradientoverlay-twitter-largeasin-0to60,TopLeft,0,0_PJAdblSocialShare-AudibleLogo-Medium,TopLeft,490,223_OU01_ZBLISTENING%20ON,483,152,55,450,AudibleSansMd,32,255,255,255.jpg"
+      },
+      "subtitle": "The Lost Fleet, Book 1",
+      "thesaurus_subject_keywords": [
+        "literature-and-fiction"
+      ],
+      "title": "Dauntless (Dramatized Adaptation)"
+    }
+  ],
+  "response_groups": [
+    "product_desc",
+    "always-returned",
+    "contributors",
+    "series",
+    "media",
+    "product_attrs"
+  ],
+  "total_results": 3
+}

@@ -1,0 +1,27 @@
+# Build output
+/dist/
+/bin/
+/audiobookrenamer
+/audiobookrenamer.exe
+
+# Config / data (local runs)
+/config/
+*.db
+*.db-shm
+*.db-wal
+
+# Frontend
+/web/node_modules/
+/web/.vite/
+/web/coverage/
+# internal/webui/dist holds the built SPA that gets go:embed-ed. A placeholder
+# index.html is committed so `go build`/`go test` work without a frontend build;
+# `make build` (Vite) regenerates index.html + assets/.
+/internal/webui/dist/assets/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

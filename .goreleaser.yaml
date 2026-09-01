@@ -1,0 +1,60 @@
+# goreleaser config for audiobookrenamer.
+# Build the frontend first: `npm --prefix web ci && npm --prefix web run build`
+# (the release CI workflow does this before invoking goreleaser).
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: audiobookrenamer
+    main: ./cmd/audiobookrenamer
+    binary: audiobookrenamer
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE*
+      - packaging/audiobookrenamer.service
+
+nfpms:
+  - id: deb
+    package_name: audiobookrenamer
+    vendor: audiobookrenamer
+    homepage: https://github.com/jasonb/audiobookrenamer
+    maintainer: audiobookrenamer maintainers
+    description: Web UI to view, match, and organize an audiobook library in place.
+    license: TBD
+    formats: [deb]
+    bindir: /usr/bin
+    contents:
+      - src: packaging/audiobookrenamer.service
+        dst: /lib/systemd/system/audiobookrenamer.service
+    scripts:
+      postinstall: packaging/postinstall.sh
+      preremove: packaging/preremove.sh
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]

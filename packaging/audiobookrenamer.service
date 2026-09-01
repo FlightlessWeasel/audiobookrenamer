@@ -1,0 +1,27 @@
+[Unit]
+Description=Audiobook Library Manager
+Documentation=https://github.com/jasonb/audiobookrenamer
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=audiobookrenamer
+Group=audiobookrenamer
+Environment=ABR_CONFIG_DIR=/var/lib/audiobookrenamer
+Environment=ABR_ADDR=:8674
+ExecStart=/usr/bin/audiobookrenamer
+Restart=on-failure
+RestartSec=5
+
+# Hardening. ProtectHome/ProtectSystem are left permissive because the whole
+# job of this service is renaming media files in place, wherever the library
+# lives (often under /home, /srv, or /mnt).
+NoNewPrivileges=true
+ProtectSystem=true
+ProtectHome=false
+PrivateTmp=true
+StateDirectory=audiobookrenamer
+
+[Install]
+WantedBy=multi-user.target
