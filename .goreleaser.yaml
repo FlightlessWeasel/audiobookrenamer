@@ -38,7 +38,7 @@ nfpms:
     homepage: https://github.com/jasonb/audiobookrenamer
     maintainer: audiobookrenamer maintainers
     description: Web UI to view, match, and organize an audiobook library in place.
-    license: TBD
+    license: MIT
     formats: [deb]
     bindir: /usr/bin
     contents:

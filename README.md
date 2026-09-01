@@ -157,4 +157,4 @@ path and scan it" flow.
 
 ## License
 
-TBD
+[MIT](LICENSE) © 2026 FlightlessWeasel
