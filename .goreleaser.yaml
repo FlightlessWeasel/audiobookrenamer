@@ -51,6 +51,12 @@ nfpms:
 checksum:
   name_template: checksums.txt
 
+release:
+  # Ship the headless installer alongside the archives so a server can bootstrap
+  # with:  curl -fsSL .../releases/latest/download/install.sh | sudo bash
+  extra_files:
+    - glob: ./scripts/install.sh
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 

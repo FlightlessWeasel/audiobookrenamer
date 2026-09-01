@@ -71,6 +71,26 @@ sudo dpkg -i audiobookrenamer_*_amd64.deb
 sudo systemctl enable --now audiobookrenamer   # listens on :8674
 ```
 
+### Headless install script (Linux, systemd)
+
+For servers without `apt`/`dpkg`, `scripts/install.sh` fetches the release
+archive for the host's architecture, creates the `audiobookrenamer` service
+user, installs the binary to `/usr/bin`, writes the `systemd` unit, and starts
+it. State (SQLite DB, provider keys, session secret) lives in
+`/var/lib/audiobookrenamer`.
+
+```sh
+# Fresh install (latest release)
+curl -fsSL https://github.com/FlightlessWeasel/audiobookrenamer/releases/latest/download/install.sh | sudo bash
+
+# Update in place and restart (rolls back if the new binary fails to start)
+curl -fsSL https://github.com/FlightlessWeasel/audiobookrenamer/releases/latest/download/install.sh | sudo bash -s -- --update
+```
+
+Useful flags: `--version vX.Y.Z`, `--os-upgrade`, `--port`, `--no-start`,
+`--force`. Run `install.sh --help` for the full list. The `.deb` and the script
+install to the same layout, so pick one.
+
 ### From source
 
 Requires Go 1.26+ and Node 20+.
