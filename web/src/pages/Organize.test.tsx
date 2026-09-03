@@ -15,6 +15,45 @@ function book(id: string, library_id: string) {
   return { id, library_id, layout: "single", state: "matched", title: `Book ${id}`, updated_at: "" };
 }
 
+describe("OrganizePage grouping", () => {
+  it("groups the selection list by author, sorted by author, with per-group counts", async () => {
+    mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) {
+        return {
+          body: {
+            books: [
+              { ...book("a1", "A"), author: "Zed Author" },
+              { ...book("a2", "A"), author: "Amy Author" },
+              { ...book("a3", "A"), author: "Amy Author" },
+              { ...book("a4", "A"), author: "" },
+            ],
+            counts: {},
+          },
+        };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(<OrganizePage />);
+    await waitFor(() => expect(screen.getByText("4 of 4 matched books")).toBeInTheDocument());
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /group books by/i }), "author");
+
+    const groupHeaders = screen
+      .getAllByRole("columnheader")
+      .filter((h) => h.getAttribute("colspan") === "2");
+    expect(groupHeaders.map((h) => h.textContent)).toEqual([
+      "Amy Author2",
+      "Unknown author1",
+      "Zed Author1",
+    ]);
+    // Grouping is display-only: every book is still checked and selectable.
+    expect(screen.getByRole("checkbox", { name: /select book a4/i })).toBeChecked();
+  });
+});
+
 describe("OrganizePage library switching", () => {
   it("clears the selection when the library changes so stale ids can't be applied", async () => {
     let releaseB: (() => void) | null = null;
@@ -37,7 +76,7 @@ describe("OrganizePage library switching", () => {
     // Library A loads and auto-selects both books.
     await waitFor(() => expect(screen.getByText("2 of 2 matched books")).toBeInTheDocument());
 
-    await user.selectOptions(screen.getByRole("combobox"), "B");
+    await user.selectOptions(screen.getByRole("combobox", { name: /organize library/i }), "B");
 
     // While B is still loading, A's rows are gone and Preview is disabled, so
     // A's ids can't be submitted against library B.

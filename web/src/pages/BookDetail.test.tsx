@@ -161,3 +161,66 @@ describe("BookDetail manual entry preserves existing metadata", () => {
     expect(manual.cover_url).toBe("https://example.test/cover.jpg");
   });
 });
+
+describe("BookDetail organize panel", () => {
+  it("previews and applies the rename for this one book", async () => {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    mockFetch((path, init) => {
+      if (path === "/books/b1" && (!init || init.method === undefined)) return { body: book };
+      if (path === "/books/b1/candidates") return { body: [] };
+      if (path === "/settings") return { body: settings };
+      if (path === "/organize/preview" && init?.method === "POST") {
+        calls.push({ path, body: JSON.parse(String(init?.body)) });
+        return {
+          body: {
+            library_id: "L1",
+            root_path: "/lib",
+            books: [
+              {
+                book_id: "b1",
+                title: "Dune",
+                skip: false,
+                moves: [{ from_rel: "Dune/old.m4b", to_rel: "Herbert, Frank/Dune/Dune.m4b", no_op: false }],
+              },
+            ],
+          },
+        };
+      }
+      if (path === "/organize/apply" && init?.method === "POST") {
+        calls.push({ path, body: JSON.parse(String(init?.body)) });
+        return { body: { id: "job1", type: "organize", status: "queued", total: 0, done: 0, created_at: "" } };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    renderBookDetail();
+
+    await user.click(await screen.findByRole("button", { name: /preview rename/i }));
+
+    expect(await screen.findByText("Herbert, Frank/Dune/Dune.m4b")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() => expect(screen.getByText(/Organize job queued/i)).toBeInTheDocument());
+    expect(calls.map((c) => [c.path, c.body])).toEqual([
+      ["/organize/preview", { library_id: "L1", book_ids: ["b1"] }],
+      ["/organize/apply", { library_id: "L1", book_ids: ["b1"] }],
+    ]);
+  });
+
+  it("cannot organize a book that isn't matched yet", async () => {
+    mockFetch((path, init) => {
+      if (path === "/books/b1" && (!init || init.method === undefined))
+        return { body: { ...book, state: "unmatched" } };
+      if (path === "/books/b1/candidates") return { body: [] };
+      if (path === "/settings") return { body: settings };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    renderBookDetail();
+
+    expect(await screen.findByText(/Match this book before organizing/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /preview rename/i })).toBeDisabled();
+  });
+});

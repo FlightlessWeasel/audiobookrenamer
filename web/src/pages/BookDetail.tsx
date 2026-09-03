@@ -1,10 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { errorMessage } from "../lib/errorMessage";
-import { client, type Book, type Candidate, type ManualMatch } from "../api/client";
+import {
+  client,
+  type Book,
+  type Candidate,
+  type ManualMatch,
+  type OrganizePlan,
+} from "../api/client";
 import { useAction } from "../lib/useAction";
 import { useAsync } from "../lib/useAsync";
 import { statusLabel } from "../lib/status";
+import { BookPlanCard, planHasRealMoves, planHasWork } from "../components/BookPlanCard";
 
 // parseYear returns a plausible 4-digit-ish year, or undefined for blank or
 // non-numeric input, so a stray "abc" never gets sent as NaN/null.
@@ -168,6 +175,8 @@ export function BookDetailPage() {
         }}
       />
 
+      <OrganizePanel key={`organize-${b.id}`} book={b} onOrganized={reloadAll} />
+
       <ManualSearch
         book={b}
         providers={providerOptions}
@@ -224,6 +233,104 @@ export function BookDetailPage() {
         </ul>
       </div>
     </div>
+  );
+}
+
+// OrganizePanel previews and applies the rename for this single book, so a
+// book can be filed without going to the Organize tab and hunting for it. It
+// drives the same /organize/preview + /organize/apply endpoints scoped to one
+// book id.
+function OrganizePanel({
+  book,
+  onOrganized,
+}: {
+  book: Book;
+  onOrganized: () => void;
+}) {
+  const canOrganize = book.state === "matched" || book.state === "organized";
+  const [plan, setPlan] = useState<OrganizePlan | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const { run, isBusy, error, mounted } = useAction();
+
+  // A rematch or sort-name edit changes the target path; drop a stale preview
+  // so the user can't Apply a plan that no longer reflects the book. The
+  // "job queued" message is left alone — a post-Apply reload lands here and
+  // must not wipe the confirmation.
+  useEffect(() => {
+    setPlan(null);
+  }, [book.updated_at]);
+
+  function preview() {
+    setMsg(null);
+    run(async () => {
+      const p = await client.organizePreview(book.library_id, [book.id]);
+      if (mounted.current) setPlan(p);
+    }, "preview");
+  }
+
+  function apply() {
+    run(async () => {
+      await client.organizeApply(book.library_id, [book.id]);
+      if (!mounted.current) return;
+      setMsg("Organize job queued — watch the Activity tab.");
+      setPlan(null);
+      onOrganized();
+    }, "apply");
+  }
+
+  const bp = plan?.books[0] ?? null;
+  const hasWork = plan ? planHasWork(plan) : false;
+  const hasRealMoves = plan ? planHasRealMoves(plan) : false;
+
+  return (
+    <section className="max-w-xl space-y-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-sm font-medium">Organize</h2>
+        <button
+          onClick={preview}
+          disabled={!canOrganize || isBusy("preview") || isBusy("apply")}
+          className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+        >
+          {isBusy("preview") ? "Building…" : plan ? "Rebuild preview" : "Preview rename"}
+        </button>
+        {plan && (
+          <button
+            onClick={apply}
+            disabled={!hasWork || isBusy("apply")}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-slate-700"
+          >
+            {isBusy("apply") ? "Queuing…" : "Apply"}
+          </button>
+        )}
+      </div>
+
+      {!canOrganize && (
+        <p className="text-sm text-slate-500">
+          Match this book before organizing — only matched or organized books can be renamed.
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="rounded bg-red-100 px-3 py-2 text-sm text-red-800">
+          {error}
+        </p>
+      )}
+      {msg && <p className="rounded bg-green-100 px-3 py-2 text-sm text-green-800">{msg}</p>}
+
+      {plan && plan.conflicts && plan.conflicts.length > 0 && (
+        <p className="rounded bg-amber-100 px-3 py-2 text-sm text-amber-800">
+          Target path collides with another book; this book is skipped.
+        </p>
+      )}
+      {plan && !hasWork && (
+        <p className="text-sm text-slate-500">Nothing to do — this book was skipped.</p>
+      )}
+      {plan && hasWork && !hasRealMoves && (
+        <p className="text-sm text-slate-500">
+          Files are already in place — Apply just marks this book organized.
+        </p>
+      )}
+      {bp && <BookPlanCard plan={bp} />}
+    </section>
   );
 }
 

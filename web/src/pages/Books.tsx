@@ -5,60 +5,14 @@ import { useAction } from "../lib/useAction";
 import { useAsync } from "../lib/useAsync";
 import { useDebounced } from "../lib/useDebounced";
 import { statusBadgeClass, statusLabel } from "../lib/status";
+import {
+  GROUP_OPTIONS,
+  groupBooks,
+  groupOptionLabel,
+  type GroupBy,
+} from "../lib/groupBooks";
 
 const STATES = ["unmatched", "needs_review", "matched", "organized", "error"] as const;
-
-const GROUP_OPTIONS = [
-  { value: "", label: "No grouping" },
-  { value: "author", label: "Author" },
-  { value: "series", label: "Series" },
-  { value: "library", label: "Library" },
-  { value: "state", label: "State" },
-] as const;
-
-type GroupBy = (typeof GROUP_OPTIONS)[number]["value"];
-
-type BookGroup = { label: string; books: Book[] };
-
-// Groups the already-fetched book list client-side. Returns null when no
-// grouping is selected so the caller renders the flat list unchanged. Groups
-// are sorted by label; within a group the server's ordering is preserved.
-function groupBooks(
-  books: Book[],
-  groupBy: GroupBy,
-  libName: (id: string) => string,
-): BookGroup[] | null {
-  if (!groupBy) return null;
-
-  const keyOf = (b: Book): { key: string; label: string } => {
-    switch (groupBy) {
-      case "author":
-        return { key: b.author ?? "", label: b.author || "Unknown author" };
-      case "series":
-        return { key: b.series ?? "", label: b.series || "No series" };
-      case "library":
-        return { key: b.library_id, label: libName(b.library_id) };
-      case "state":
-        return { key: b.state, label: statusLabel(b.state) };
-      default:
-        return { key: "", label: "" };
-    }
-  };
-
-  const groups = new Map<string, BookGroup>();
-  for (const b of books) {
-    const { key, label } = keyOf(b);
-    let g = groups.get(key);
-    if (!g) {
-      g = { label, books: [] };
-      groups.set(key, g);
-    }
-    g.books.push(b);
-  }
-  return [...groups.values()].sort((a, b) =>
-    a.label.localeCompare(b.label, undefined, { sensitivity: "base" }),
-  );
-}
 
 export function BooksPage() {
   const libs = useAsync((signal) => client.listLibraries({ signal }), []);
@@ -147,7 +101,7 @@ export function BooksPage() {
         >
           {GROUP_OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>
-              {o.value ? `Group by ${o.label.toLowerCase()}` : o.label}
+              {groupOptionLabel(o)}
             </option>
           ))}
         </select>

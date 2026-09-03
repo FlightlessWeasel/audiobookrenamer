@@ -1,7 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { client, type OrganizePlan } from "../api/client";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { client, type Book, type OrganizePlan } from "../api/client";
 import { useAction } from "../lib/useAction";
 import { useAsync } from "../lib/useAsync";
+import {
+  GROUP_OPTIONS,
+  groupBooks,
+  groupOptionLabel,
+  type GroupBy,
+} from "../lib/groupBooks";
+import { BookPlanCard, planHasRealMoves, planHasWork } from "../components/BookPlanCard";
 
 export function OrganizePage() {
   const libs = useAsync((signal) => client.listLibraries({ signal }), []);
@@ -25,6 +32,7 @@ export function OrganizePage() {
   );
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [groupBy, setGroupBy] = useState<GroupBy>("");
   const [plan, setPlan] = useState<OrganizePlan | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   // "preview" and "apply" are independent busy flags; the buttons already
@@ -69,6 +77,16 @@ export function OrganizePage() {
 
   const bookIds = useMemo(() => [...selected], [selected]);
 
+  const libName = useMemo(() => {
+    const m = new Map(libs.data?.map((l) => [l.id, l.name]));
+    return (id: string) => m.get(id) ?? "—";
+  }, [libs.data]);
+
+  const groups = useMemo(
+    () => groupBooks(books, groupBy, libName),
+    [books, groupBy, libName],
+  );
+
   function preview() {
     if (loadingBooks) return;
     setMsg(null);
@@ -97,15 +115,8 @@ export function OrganizePage() {
     });
   }
 
-  // Whether Apply has anything to do: any book that isn't skipped. A book
-  // whose files are already at their target path still has moves in the plan
-  // (all no_op) but is NOT skipped — it still needs Apply to run so its status
-  // can be finalized back to "organized". Gating on "some move is not a
-  // no-op" would leave a rematched, already-correctly-placed book stuck at
-  // "matched" with Apply permanently disabled for it.
-  const planHasWork = plan?.books.some((b) => !b.skip) ?? false;
-  const planHasRealMoves =
-    plan?.books.some((b) => !b.skip && b.moves.some((m) => !m.no_op)) ?? false;
+  const hasWork = plan ? planHasWork(plan) : false;
+  const hasRealMoves = plan ? planHasRealMoves(plan) : false;
 
   return (
     <div className="space-y-5">
@@ -115,11 +126,24 @@ export function OrganizePage() {
         <select
           value={libraryId}
           onChange={(e) => setLibraryId(e.target.value)}
+          aria-label="Organize library"
           className="rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800"
         >
           {libs.data?.map((l) => (
             <option key={l.id} value={l.id}>
               {l.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={groupBy}
+          onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+          aria-label="Group books by"
+          className="rounded border border-slate-300 px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-800"
+        >
+          {GROUP_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {groupOptionLabel(o)}
             </option>
           ))}
         </select>
@@ -135,7 +159,7 @@ export function OrganizePage() {
         </button>
         <button
           onClick={apply}
-          disabled={!plan || !planHasWork || acting || loadingBooks}
+          disabled={!plan || !hasWork || acting || loadingBooks}
           className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-slate-700"
         >
           {isBusy("apply") ? "Queuing…" : "Apply"}
@@ -149,25 +173,37 @@ export function OrganizePage() {
         <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-800">
           <table className="w-full text-sm">
             <tbody>
-              {books.map((b) => (
-                <tr key={b.id} className="border-t border-slate-100 first:border-t-0 dark:border-slate-800">
-                  <td className="w-10 px-3 py-2">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${b.title || b.id}`}
+              {groups
+                ? groups.map((g) => (
+                    <Fragment key={g.label}>
+                      <tr className="border-t border-slate-200 bg-slate-50 first:border-t-0 dark:border-slate-700 dark:bg-slate-800/50">
+                        <th
+                          colSpan={2}
+                          scope="colgroup"
+                          className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
+                        >
+                          {g.label}
+                          <span className="ml-2 font-normal text-slate-400">{g.books.length}</span>
+                        </th>
+                      </tr>
+                      {g.books.map((b) => (
+                        <SelectRow
+                          key={b.id}
+                          book={b}
+                          checked={selected.has(b.id)}
+                          onToggle={() => toggle(b.id)}
+                        />
+                      ))}
+                    </Fragment>
+                  ))
+                : books.map((b) => (
+                    <SelectRow
+                      key={b.id}
+                      book={b}
                       checked={selected.has(b.id)}
-                      onChange={() => toggle(b.id)}
+                      onToggle={() => toggle(b.id)}
                     />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="font-medium">{b.title}</div>
-                    <div className="text-xs text-slate-400">
-                      {b.author}
-                      {b.series ? ` · ${b.series} ${b.series_index ?? ""}` : ""} · {b.layout}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                  ))}
               {books.length === 0 && (
                 <tr>
                   <td className="px-3 py-6 text-center text-slate-500">
@@ -190,43 +226,49 @@ export function OrganizePage() {
               {plan.conflicts.length} path collision(s); affected books are skipped.
             </p>
           )}
-          {!planHasWork && (
+          {!hasWork && (
             <p className="text-sm text-slate-500">Nothing to do — every selected book was skipped.</p>
           )}
-          {planHasWork && !planHasRealMoves && (
+          {hasWork && !hasRealMoves && (
             <p className="text-sm text-slate-500">
               No files need to move — Apply will just update these books' status to organized.
             </p>
           )}
           {plan.books.map((bp) => (
-            <div
-              key={bp.book_id}
-              className={`rounded-lg border p-3 text-sm ${
-                bp.skip
-                  ? "border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-900/40"
-                  : "border-slate-200 dark:border-slate-800"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium">{bp.title}</span>
-                {bp.skip && <span className="text-xs text-amber-600">skipped — {bp.reason}</span>}
-              </div>
-              {!bp.skip && (
-                <ul className="mt-2 space-y-1 font-mono text-xs">
-                  {bp.moves.map((m, i) => (
-                    <li key={i} className={m.no_op ? "text-slate-400" : ""}>
-                      <span className="text-slate-500">{m.from_rel}</span>
-                      <span className="mx-1">→</span>
-                      <span>{m.to_rel}</span>
-                      {m.no_op && <span className="ml-2 text-slate-400">(no change)</span>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <BookPlanCard key={bp.book_id} plan={bp} />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function SelectRow({
+  book: b,
+  checked,
+  onToggle,
+}: {
+  book: Book;
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <tr className="border-t border-slate-100 first:border-t-0 dark:border-slate-800">
+      <td className="w-10 px-3 py-2">
+        <input
+          type="checkbox"
+          aria-label={`Select ${b.title || b.id}`}
+          checked={checked}
+          onChange={onToggle}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <div className="font-medium">{b.title}</div>
+        <div className="text-xs text-slate-400">
+          {b.author}
+          {b.series ? ` · ${b.series} ${b.series_index ?? ""}` : ""} · {b.layout}
+        </div>
+      </td>
+    </tr>
   );
 }
