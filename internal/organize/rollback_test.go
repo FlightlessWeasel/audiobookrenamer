@@ -137,6 +137,46 @@ func TestMoveAcrossDevices_CopiesThenRemovesSource(t *testing.T) {
 	}
 }
 
+// When the copy succeeds but the source can't be deleted (a read-only mergerfs
+// branch, an immutable file), the just-placed copy is removed again so the tree
+// is left untouched — a stranded duplicate would also stop the caller's
+// rollback from pruning the new directory.
+func TestMoveAcrossDevices_UndoesCopyWhenSourceCannotBeRemoved(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := filepath.Join(dir, "src")
+	src := filepath.Join(srcDir, "a.m4b")
+	dst := filepath.Join(dir, "dst", "b.m4b")
+	writeFile(t, src)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Unlink needs write on the parent directory; drop it so os.Remove(src)
+	// fails. Windows chmod and root ignore this, so probe with a throwaway
+	// file and skip where the mode isn't enforced.
+	probe := filepath.Join(srcDir, "probe")
+	if err := os.WriteFile(probe, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(srcDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(srcDir, 0o755) })
+	if os.Remove(probe) == nil {
+		t.Skip("filesystem does not enforce directory write permission for unlink")
+	}
+
+	err := moveAcrossDevices(src, dst)
+	if err == nil || !strings.Contains(err.Error(), "could not remove source") {
+		t.Fatalf("err = %v, want a 'could not remove source' failure", err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("source must be left in place when it can't be removed: %v", err)
+	}
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("the copy at dst must be undone, leaving no duplicate")
+	}
+}
+
 // padRoot returns a library root at least want runes long, built from nested
 // segments short enough to stay inside the per-component limit on every OS.
 func padRoot(t *testing.T, want int) string {

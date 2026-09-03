@@ -555,10 +555,17 @@ func moveAcrossDevices(src, dst string) error {
 		return fmt.Errorf("close %s: %w", src, err)
 	}
 	// dst is complete and durable; dropping the source is what makes this a
-	// move. A failure here leaves both copies rather than losing the file, so it
-	// is reported but the destination stands.
+	// move. If the source can't be removed (a read-only mergerfs branch, an
+	// immutable file, a directory the process can't write) undo the copy we
+	// just placed so the tree is left exactly as we found it — a stranded
+	// duplicate at dst would also defeat the caller's rollback, which can't
+	// rmdir a directory that now holds it. Only if that cleanup also fails is
+	// the file genuinely in two places, and the error says so.
 	if err := os.Remove(src); err != nil {
-		return fmt.Errorf("copied to %s but could not remove %s: %w", dst, src, err)
+		if rmErr := os.Remove(dst); rmErr != nil {
+			return fmt.Errorf("copied to %s but could not remove %s (%w); also could not remove the copy: %v", dst, src, err, rmErr)
+		}
+		return fmt.Errorf("could not remove source %s after copying it: %w", src, err)
 	}
 	return nil
 }
