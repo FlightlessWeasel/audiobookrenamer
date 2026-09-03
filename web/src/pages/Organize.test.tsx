@@ -54,6 +54,92 @@ describe("OrganizePage grouping", () => {
   });
 });
 
+describe("OrganizePage bulk selection", () => {
+  it("toggles every book with the top-level select-all checkbox", async () => {
+    mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) {
+        return { body: { books: [book("a1", "A"), book("a2", "A"), book("a3", "A")], counts: {} } };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(<OrganizePage />);
+    await waitFor(() => expect(screen.getByText("3 of 3 matched books")).toBeInTheDocument());
+
+    const selectAll = screen.getByRole("checkbox", { name: /select all books/i });
+    expect(selectAll).toBeChecked();
+
+    await user.click(selectAll);
+    await waitFor(() => expect(screen.getByText("0 of 3 matched books")).toBeInTheDocument());
+    expect(screen.getByRole("checkbox", { name: /select book a2/i })).not.toBeChecked();
+
+    await user.click(selectAll);
+    await waitFor(() => expect(screen.getByText("3 of 3 matched books")).toBeInTheDocument());
+  });
+
+  it("selects and clears a single group with its group checkbox", async () => {
+    mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) {
+        return {
+          body: {
+            books: [
+              { ...book("a1", "A"), author: "Amy Author" },
+              { ...book("a2", "A"), author: "Amy Author" },
+              { ...book("a3", "A"), author: "Zed Author" },
+            ],
+            counts: {},
+          },
+        };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(<OrganizePage />);
+    await waitFor(() => expect(screen.getByText("3 of 3 matched books")).toBeInTheDocument());
+    await user.selectOptions(screen.getByRole("combobox", { name: /group books by/i }), "author");
+
+    const amyGroup = screen.getByRole("checkbox", { name: /select all in amy author/i });
+    expect(amyGroup).toBeChecked();
+
+    await user.click(amyGroup);
+    await waitFor(() => expect(screen.getByText("1 of 3 matched books")).toBeInTheDocument());
+    expect(screen.getByRole("checkbox", { name: /select book a1/i })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /select book a3/i })).toBeChecked();
+
+    await user.click(amyGroup);
+    await waitFor(() => expect(screen.getByText("3 of 3 matched books")).toBeInTheDocument());
+  });
+
+  it("shows the matching provider and score for each book", async () => {
+    mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) {
+        return {
+          body: {
+            books: [
+              { ...book("a1", "A"), matched_provider: "audible", match_score: 0.92 },
+              { ...book("a2", "A") },
+            ],
+            counts: {},
+          },
+        };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    render(<OrganizePage />);
+    await waitFor(() => expect(screen.getByText("2 of 2 matched books")).toBeInTheDocument());
+
+    expect(screen.getByText("audible")).toBeInTheDocument();
+    expect(screen.getByText("92%")).toBeInTheDocument();
+    expect(screen.getByText("no match info")).toBeInTheDocument();
+  });
+});
+
 describe("OrganizePage library switching", () => {
   it("clears the selection when the library changes so stale ids can't be applied", async () => {
     let releaseB: (() => void) | null = null;

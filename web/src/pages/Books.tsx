@@ -12,6 +12,7 @@ import {
   type GroupBy,
 } from "../lib/groupBooks";
 import { useGroupBy } from "../lib/useGroupBy";
+import { formatScore, scoreClass } from "../lib/matchScore";
 
 const STATES = ["unmatched", "needs_review", "matched", "organized", "error"] as const;
 
@@ -157,18 +158,6 @@ export function BooksPage() {
       </div>
     </div>
   );
-}
-
-// Scores are 0..1 from the matcher; shown as whole percent so the column stays
-// narrow, and coloured so a weak match is visible without reading the number.
-function formatScore(score: number) {
-  return `${Math.round(score * 100)}%`;
-}
-
-function scoreClass(score: number) {
-  if (score >= 0.85) return "text-emerald-600 dark:text-emerald-400";
-  if (score >= 0.6) return "text-amber-600 dark:text-amber-400";
-  return "text-red-600 dark:text-red-400";
 }
 
 // AcceptTopButton bulk-accepts each unmatched / needs-review book's best stored

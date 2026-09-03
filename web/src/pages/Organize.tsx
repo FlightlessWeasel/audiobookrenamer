@@ -9,6 +9,7 @@ import {
   type GroupBy,
 } from "../lib/groupBooks";
 import { useGroupBy } from "../lib/useGroupBy";
+import { formatScore, scoreClass } from "../lib/matchScore";
 import { BookPlanCard, planHasRealMoves, planHasWork } from "../components/BookPlanCard";
 
 export function OrganizePage() {
@@ -116,6 +117,20 @@ export function OrganizePage() {
     });
   }
 
+  // Bulk (de)select a set of ids — backs both the "select all" checkbox and the
+  // per-group checkboxes.
+  function setMany(ids: string[], on: boolean) {
+    setSelected((s) => {
+      const n = new Set(s);
+      for (const id of ids) (on ? n.add(id) : n.delete(id));
+      return n;
+    });
+  }
+
+  const allIds = books.map((b) => b.id);
+  const allSelected = books.length > 0 && allIds.every((id) => selected.has(id));
+  const someSelected = allIds.some((id) => selected.has(id));
+
   const hasWork = plan ? planHasWork(plan) : false;
   const hasRealMoves = plan ? planHasRealMoves(plan) : false;
 
@@ -148,9 +163,18 @@ export function OrganizePage() {
             </option>
           ))}
         </select>
-        <span className="text-sm text-slate-500">
-          {loadingBooks ? "loading books…" : `${selected.size} of ${books.length} matched books`}
-        </span>
+        <label className="flex items-center gap-2 text-sm text-slate-500">
+          <TriStateCheckbox
+            checked={allSelected}
+            indeterminate={someSelected && !allSelected}
+            disabled={loadingBooks || books.length === 0}
+            onChange={() => setMany(allIds, !allSelected)}
+            label="Select all books"
+          />
+          <span>
+            {loadingBooks ? "loading books…" : `${selected.size} of ${books.length} matched books`}
+          </span>
+        </label>
         <button
           onClick={preview}
           disabled={!libraryId || selected.size === 0 || acting || loadingBooks}
@@ -175,7 +199,11 @@ export function OrganizePage() {
           <table className="w-full text-sm">
             <tbody>
               {groups
-                ? groups.map((g) => (
+                ? groups.map((g) => {
+                    const gIds = g.books.map((b) => b.id);
+                    const gAll = gIds.every((id) => selected.has(id));
+                    const gSome = gIds.some((id) => selected.has(id));
+                    return (
                     <Fragment key={g.label}>
                       <tr className="border-t border-slate-200 bg-slate-50 first:border-t-0 dark:border-slate-700 dark:bg-slate-800/50">
                         <th
@@ -183,8 +211,16 @@ export function OrganizePage() {
                           scope="colgroup"
                           className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
                         >
-                          {g.label}
-                          <span className="ml-2 font-normal text-slate-400">{g.books.length}</span>
+                          <label className="flex items-center gap-2 normal-case">
+                            <TriStateCheckbox
+                              checked={gAll}
+                              indeterminate={gSome && !gAll}
+                              onChange={() => setMany(gIds, !gAll)}
+                              label={`Select all in ${g.label}`}
+                            />
+                            <span>{g.label}</span>
+                            <span className="font-normal text-slate-400">{g.books.length}</span>
+                          </label>
                         </th>
                       </tr>
                       {g.books.map((b) => (
@@ -196,7 +232,8 @@ export function OrganizePage() {
                         />
                       ))}
                     </Fragment>
-                  ))
+                    );
+                  })
                 : books.map((b) => (
                     <SelectRow
                       key={b.id}
@@ -264,12 +301,61 @@ function SelectRow({
         />
       </td>
       <td className="px-3 py-2">
-        <div className="font-medium">{b.title}</div>
-        <div className="text-xs text-slate-400">
-          {b.author}
-          {b.series ? ` · ${b.series} ${b.series_index ?? ""}` : ""} · {b.layout}
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="font-medium">{b.title}</div>
+            <div className="text-xs text-slate-400">
+              {b.author}
+              {b.series ? ` · ${b.series} ${b.series_index ?? ""}` : ""} · {b.layout}
+            </div>
+          </div>
+          <div className="whitespace-nowrap text-right text-xs">
+            {b.matched_provider ? (
+              <>
+                <span className="text-slate-500 dark:text-slate-400">{b.matched_provider}</span>
+                {b.match_score !== undefined && (
+                  <span className={`ml-2 ${scoreClass(b.match_score)}`}>
+                    {formatScore(b.match_score)}
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-slate-400">no match info</span>
+            )}
+          </div>
         </div>
       </td>
     </tr>
+  );
+}
+
+// A checkbox that also renders the "some but not all" indeterminate state,
+// which React can only set imperatively on the DOM node.
+function TriStateCheckbox({
+  checked,
+  indeterminate,
+  onChange,
+  label,
+  disabled,
+}: {
+  checked: boolean;
+  indeterminate: boolean;
+  onChange: () => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = !checked && indeterminate;
+  }, [checked, indeterminate]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      aria-label={label}
+      checked={checked}
+      disabled={disabled}
+      onChange={onChange}
+    />
   );
 }
