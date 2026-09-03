@@ -229,6 +229,25 @@ func getBookBareTx(tx *sql.Tx, id string) (model.Book, error) {
 	return b, err
 }
 
+// BookIDAt returns the id of the book with the given identity
+// (library_id, source_dir, source_file), or "" if no row matches. The match is
+// exact, mirroring the idx_books_identity UNIQUE index that FinalizeOrganize
+// writes against.
+func (d *DB) BookIDAt(libraryID, sourceDir, sourceFile string) (string, error) {
+	var id string
+	err := d.QueryRow(
+		`SELECT id FROM books WHERE library_id = ? AND source_dir = ? AND source_file = ?`,
+		libraryID, sourceDir, sourceFile,
+	).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
 // GetBookBare returns a book without its files.
 func (d *DB) GetBookBare(id string) (model.Book, error) {
 	row := d.QueryRow(`SELECT `+bookCols+` FROM books WHERE id = ?`, id)

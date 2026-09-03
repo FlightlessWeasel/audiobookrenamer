@@ -148,6 +148,13 @@ func BuildPlan(database *db.DB, libraryID string, bookIDs []string) (*Plan, erro
 	// target-abs (case-folded) -> bookID that owns it, to detect cross-book
 	// collisions.
 	claimed := map[string]string{}
+	// folded target folder -> bookID. Every organized book's DB identity is
+	// (library_id, source_dir, source_file="") — see FinalizeOrganize — so two
+	// books that land in the same folder collide on that UNIQUE index even when
+	// their file names differ and `claimed` never trips (e.g. a file template
+	// keyed on {narrator} for two editions of one title). Catch it here and skip
+	// the later book with a visible reason, exactly as for a shared file target.
+	claimedDirs := map[string]string{}
 
 	for _, b := range books {
 		if len(b.Files) == 0 {
@@ -179,9 +186,45 @@ func BuildPlan(database *db.DB, libraryID string, bookIDs []string) (*Plan, erro
 			}
 			keys = append(keys, key)
 		}
+		// A surviving book also claims its destination folder. Unlike the file
+		// keys this is checked even when every move is a NoOp: a book already
+		// sitting at its target still gets finalized to (source_dir, "") and
+		// would collide with a second book targeting the same folder.
+		dirKey := ""
+		if !bp.Skip && bp.NewSourceDir != "" {
+			dirKey = strings.ToLower(filepath.ToSlash(bp.NewSourceDir))
+			if prev, taken := claimedDirs[dirKey]; taken && prev != b.ID {
+				bp.Skip = true
+				bp.Reason = "target folder collides with another book in this run"
+				plan.Conflicts = append(plan.Conflicts, mustRel(lib.RootPath, bp.NewSourceDir))
+			}
+		}
+		if dirKey != "" && !bp.Skip {
+			// Another book already parked at this exact identity
+			// (source_dir, source_file="") means finalizing this book to the same
+			// identity would trip the UNIQUE index. This covers a duplicate that
+			// isn't in the run at all (it plainly isn't moving) and one that is
+			// (claimedDirs only sees books already planned this pass, so it can't
+			// rely on ordering). If that incumbent is itself relocating this run
+			// the skip is a harmless false positive that clears on the next run
+			// once the folder is empty. Skip now with a visible reason rather
+			// than aborting mid-run.
+			occ, err := database.BookIDAt(libraryID, bp.NewSourceDir, "")
+			if err != nil {
+				return nil, err
+			}
+			if occ != "" && occ != b.ID {
+				bp.Skip = true
+				bp.Reason = "target folder already holds another book in this library"
+				plan.Conflicts = append(plan.Conflicts, mustRel(lib.RootPath, bp.NewSourceDir))
+			}
+		}
 		if !bp.Skip {
 			for _, k := range keys {
 				claimed[k] = b.ID
+			}
+			if dirKey != "" {
+				claimedDirs[dirKey] = b.ID
 			}
 		}
 		plan.Books = append(plan.Books, bp)

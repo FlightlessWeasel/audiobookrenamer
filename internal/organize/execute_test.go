@@ -662,6 +662,96 @@ func TestFinalizeOrganize_RejectsCrossBookFileIDs(t *testing.T) {
 	}
 }
 
+// Two different books whose metadata renders the SAME target folder but
+// DIFFERENT file names (here: distinct narrators in the file template). The
+// per-file collision guard never fires because no file target is shared, yet
+// FinalizeOrganize writes both books to the same
+// (library_id, source_dir, source_file="") identity and the second UPDATE trips
+// the UNIQUE index. The planner must detect the shared destination folder and
+// skip the later book, exactly as it does for a shared file target.
+func TestBuildPlan_SkipsBooksSharingATargetFolder(t *testing.T) {
+	d := openTestDB(t)
+	root := t.TempDir()
+	lib, err := d.CreateLibrary(model.Library{
+		Name: "L", RootPath: root, StructureMode: model.AuthorFirst,
+		FileTemplate: "{title} ({year}) - {narrator}{ext}",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a := matchedBook(t, d, lib, filepath.Join(root, "a"), filepath.Join(root, "a", "a.m4b"),
+		model.LayoutSingle, []string{"a.m4b"},
+		model.Book{Title: "Dune", Author: "Frank Herbert", Year: 1965, Narrator: "Scott Brick"})
+	b := matchedBook(t, d, lib, filepath.Join(root, "b"), filepath.Join(root, "b", "b.m4b"),
+		model.LayoutSingle, []string{"b.m4b"},
+		model.Book{Title: "Dune", Author: "Frank Herbert", Year: 1965, Narrator: "Simon Vance"})
+
+	plan, err := BuildPlan(d, lib.ID, []string{a.ID, b.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	skipped := 0
+	for _, bp := range plan.Books {
+		if bp.Skip {
+			skipped++
+		}
+	}
+	if skipped != 1 {
+		t.Fatalf("want exactly one book skipped for the shared target folder, got %d (conflicts=%v)", skipped, plan.Conflicts)
+	}
+
+	// The surviving plan must finalize without tripping the UNIQUE index on
+	// (library_id, source_dir, source_file).
+	job, _ := d.CreateJobPayload(model.JobOrganize, lib.ID, "")
+	if err := Execute(context.Background(), d, job.ID, plan, nil); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+}
+
+// A book already organized into a folder, and NOT part of this run, still holds
+// that (library_id, source_dir, source_file="") identity. A different book in
+// the run whose metadata renders to the same folder would collide with it in
+// FinalizeOrganize. The planner must skip the in-run book up front.
+func TestBuildPlan_SkipsWhenTargetFolderHeldByBookOutsideTheRun(t *testing.T) {
+	d := openTestDB(t)
+	root := t.TempDir()
+	lib, err := d.CreateLibrary(model.Library{
+		Name: "L", RootPath: root, StructureMode: model.AuthorFirst,
+		FileTemplate: "{title} ({year}) - {narrator}{ext}",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The incumbent: sits directly in its organized folder as a folder-based
+	// book (source_file=""). Its file name embeds a different narrator, so the
+	// in-run book's target file name won't clash — only the folder does.
+	organizedDir := filepath.Join(root, "Frank Herbert", "Dune (1965)")
+	incumbent := matchedBook(t, d, lib, organizedDir, "",
+		model.LayoutSingle, []string{"Dune (1965) - Scott Brick.m4b"},
+		model.Book{Title: "Dune", Author: "Frank Herbert", Year: 1965, Narrator: "Scott Brick"})
+	if err := d.SetBookState(incumbent.ID, model.StateOrganized, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// The in-run book renders to the very same folder from a messy source.
+	dup := matchedBook(t, d, lib, filepath.Join(root, "incoming"), filepath.Join(root, "incoming", "dune.m4b"),
+		model.LayoutSingle, []string{"dune.m4b"},
+		model.Book{Title: "Dune", Author: "Frank Herbert", Year: 1965, Narrator: "Simon Vance"})
+
+	plan, err := BuildPlan(d, lib.ID, []string{dup.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Books) != 1 || !plan.Books[0].Skip {
+		t.Fatalf("want the in-run book skipped, got %+v", plan.Books)
+	}
+	if len(plan.Conflicts) == 0 {
+		t.Fatal("expected the folder conflict to be reported")
+	}
+}
+
 func TestBuildPlan_SkipsUnmatchedAndCollisions(t *testing.T) {
 	d := openTestDB(t)
 	root := t.TempDir()
