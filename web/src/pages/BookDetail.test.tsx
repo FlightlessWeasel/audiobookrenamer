@@ -163,14 +163,18 @@ describe("BookDetail manual entry preserves existing metadata", () => {
 });
 
 describe("BookDetail organize panel", () => {
-  it("previews and applies the rename for this one book", async () => {
-    const calls: Array<{ path: string; body: unknown }> = [];
+  it("waits for the organize job to finish, then reloads so the book shows organized", async () => {
+    const calls: string[] = [];
+    // The book only flips to organized once the background job completes; the
+    // panel must wait for that, not read back the pre-run "matched".
+    let bookState = "matched";
     mockFetch((path, init) => {
-      if (path === "/books/b1" && (!init || init.method === undefined)) return { body: book };
+      calls.push(`${init?.method ?? "GET"} ${path}`);
+      if (path === "/books/b1" && (!init || init.method === undefined))
+        return { body: { ...book, state: bookState } };
       if (path === "/books/b1/candidates") return { body: [] };
       if (path === "/settings") return { body: settings };
       if (path === "/organize/preview" && init?.method === "POST") {
-        calls.push({ path, body: JSON.parse(String(init?.body)) });
         return {
           body: {
             library_id: "L1",
@@ -187,8 +191,12 @@ describe("BookDetail organize panel", () => {
         };
       }
       if (path === "/organize/apply" && init?.method === "POST") {
-        calls.push({ path, body: JSON.parse(String(init?.body)) });
         return { body: { id: "job1", type: "organize", status: "queued", total: 0, done: 0, created_at: "" } };
+      }
+      if (path === "/jobs/job1") {
+        // The job has finished and the book row has been updated server-side.
+        bookState = "organized";
+        return { body: { id: "job1", type: "organize", status: "done", total: 1, done: 1, created_at: "" } };
       }
       return { status: 404, body: { error: "nope" } };
     });
@@ -197,16 +205,61 @@ describe("BookDetail organize panel", () => {
     renderBookDetail();
 
     await user.click(await screen.findByRole("button", { name: /preview rename/i }));
-
     expect(await screen.findByText("Herbert, Frank/Dune/Dune.m4b")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^apply$/i }));
 
-    await waitFor(() => expect(screen.getByText(/Organize job queued/i)).toBeInTheDocument());
-    expect(calls.map((c) => [c.path, c.body])).toEqual([
-      ["/organize/preview", { library_id: "L1", book_ids: ["b1"] }],
-      ["/organize/apply", { library_id: "L1", book_ids: ["b1"] }],
-    ]);
+    await waitFor(() =>
+      expect(screen.getByText(/this book is now organized/i)).toBeInTheDocument(),
+    );
+    // The metadata reloaded and now reads the organized state.
+    expect(screen.getByText("organized")).toBeInTheDocument();
+    // It polled the job and only reloaded the book after apply, not before.
+    expect(calls).toContain("GET /jobs/job1");
+    expect(calls.filter((c) => c === "GET /books/b1").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("surfaces a failed organize job instead of claiming success", async () => {
+    mockFetch((path, init) => {
+      if (path === "/books/b1" && (!init || init.method === undefined)) return { body: book };
+      if (path === "/books/b1/candidates") return { body: [] };
+      if (path === "/settings") return { body: settings };
+      if (path === "/organize/preview" && init?.method === "POST") {
+        return {
+          body: {
+            library_id: "L1",
+            root_path: "/lib",
+            books: [
+              {
+                book_id: "b1",
+                title: "Dune",
+                skip: false,
+                moves: [{ from_rel: "a", to_rel: "b", no_op: false }],
+              },
+            ],
+          },
+        };
+      }
+      if (path === "/organize/apply" && init?.method === "POST") {
+        return { body: { id: "job1", type: "organize", status: "queued", total: 0, done: 0, created_at: "" } };
+      }
+      if (path === "/jobs/job1") {
+        return {
+          body: { id: "job1", type: "organize", status: "failed", error: "disk full", total: 1, done: 0, created_at: "" },
+        };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    renderBookDetail();
+
+    await user.click(await screen.findByRole("button", { name: /preview rename/i }));
+    await user.click(await screen.findByRole("button", { name: /^apply$/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/disk full/i);
+    expect(screen.queryByText(/now organized/i)).not.toBeInTheDocument();
   });
 
   it("cannot organize a book that isn't matched yet", async () => {

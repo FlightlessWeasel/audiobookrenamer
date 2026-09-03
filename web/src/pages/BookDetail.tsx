@@ -12,6 +12,7 @@ import { useAction } from "../lib/useAction";
 import { useAsync } from "../lib/useAsync";
 import { statusLabel } from "../lib/status";
 import { BookPlanCard, planHasRealMoves, planHasWork } from "../components/BookPlanCard";
+import { waitForJob } from "../lib/waitForJob";
 
 // parseYear returns a plausible 4-digit-ish year, or undefined for blank or
 // non-numeric input, so a stray "abc" never gets sent as NaN/null.
@@ -251,11 +252,15 @@ function OrganizePanel({
   const [plan, setPlan] = useState<OrganizePlan | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const { run, isBusy, error, mounted } = useAction();
+  // Aborts an in-flight job poll when the panel unmounts (navigating away),
+  // so waitForJob can't resolve onto a dead component.
+  const poll = useRef<AbortController | null>(null);
+  useEffect(() => () => poll.current?.abort(), []);
 
   // A rematch or sort-name edit changes the target path; drop a stale preview
   // so the user can't Apply a plan that no longer reflects the book. The
-  // "job queued" message is left alone — a post-Apply reload lands here and
-  // must not wipe the confirmation.
+  // success message is left alone — the post-Apply reload lands here and must
+  // not wipe the confirmation.
   useEffect(() => {
     setPlan(null);
   }, [book.updated_at]);
@@ -269,12 +274,34 @@ function OrganizePanel({
   }
 
   function apply() {
+    setMsg(null);
     run(async () => {
-      await client.organizeApply(book.library_id, [book.id]);
+      const job = await client.organizeApply(book.library_id, [book.id]);
+      // Organize runs as a background job: the book's state doesn't flip to
+      // "organized" until the job finishes. Wait for it, then reload so this
+      // page reflects the real outcome instead of the pre-run "matched".
+      poll.current?.abort();
+      const ctrl = new AbortController();
+      poll.current = ctrl;
+      let final;
+      try {
+        final = await waitForJob(job.id, { signal: ctrl.signal });
+      } catch (e) {
+        if (ctrl.signal.aborted) return; // panel unmounted mid-poll
+        throw e;
+      }
       if (!mounted.current) return;
-      setMsg("Organize job queued — watch the Activity tab.");
       setPlan(null);
       onOrganized();
+      if (final.status === "done") {
+        setMsg("Renamed — this book is now organized.");
+        return;
+      }
+      throw new Error(
+        final.status === "canceled"
+          ? "Organize job was canceled."
+          : final.error || "Organize job failed.",
+      );
     }, "apply");
   }
 
@@ -299,7 +326,7 @@ function OrganizePanel({
             disabled={!hasWork || isBusy("apply")}
             className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-slate-700"
           >
-            {isBusy("apply") ? "Queuing…" : "Apply"}
+            {isBusy("apply") ? "Organizing…" : "Apply"}
           </button>
         )}
       </div>

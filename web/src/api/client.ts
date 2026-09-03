@@ -666,6 +666,8 @@ export const client = {
 
   listJobs: (limit = 100, opts?: ReadOpts) =>
     api<Job[]>(`/jobs?limit=${limit}`, { signal: opts?.signal }, vJobs),
+  getJob: (id: string, opts?: ReadOpts) =>
+    api<Job>(`/jobs/${id}`, { signal: opts?.signal }, vJob),
   cancelJob: (id: string) =>
     api<void>(`/jobs/${id}/cancel`, { method: "POST" }),
   undoJob: (id: string) =>
