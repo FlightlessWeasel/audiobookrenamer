@@ -213,7 +213,7 @@ describe("BookDetail organize panel", () => {
       expect(screen.getByText(/this book is now organized/i)).toBeInTheDocument(),
     );
     // The metadata reloaded and now reads the organized state.
-    expect(screen.getByText("organized")).toBeInTheDocument();
+    expect(screen.getAllByText("organized").length).toBeGreaterThanOrEqual(1);
     // It polled the job and only reloaded the book after apply, not before.
     expect(calls).toContain("GET /jobs/job1");
     expect(calls.filter((c) => c === "GET /books/b1").length).toBeGreaterThanOrEqual(2);

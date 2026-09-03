@@ -108,8 +108,12 @@ export function BookDetailPage() {
     }, "manual:manual");
   }
 
-  if (book.loading) return <p className="text-sm text-slate-500">Loading…</p>;
-  if (book.error) return <p className="text-sm text-red-600">{book.error}</p>;
+  // Only take over the whole page on the FIRST load. A reload() (after an
+  // accept, a rematch, or an organize run) keeps showing the current book
+  // until fresh data lands, so child panels — and any success message they
+  // are holding — don't get torn down and remounted on every refresh.
+  if (book.loading && !book.data) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (book.error && !book.data) return <p className="text-sm text-red-600">{book.error}</p>;
   if (!book.data) return null;
   const b = book.data;
   const candidates = searchResults ?? stored.data ?? [];
@@ -330,6 +334,10 @@ function OrganizePanel({
           </button>
         )}
       </div>
+
+      <p className="text-xs text-slate-500">
+        Current state: <span className="font-medium">{statusLabel(book.state)}</span>
+      </p>
 
       {!canOrganize && (
         <p className="text-sm text-slate-500">
