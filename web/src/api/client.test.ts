@@ -145,4 +145,23 @@ describe("response validation", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(502);
   });
+
+  it("accepts an organize plan whose skipped book has null moves", async () => {
+    mockFetch(() => ({
+      body: {
+        library_id: "L1",
+        root_path: "/lib",
+        books: [{ book_id: "b1", title: "X", skip: true, reason: "missing title", moves: null }],
+      },
+    }));
+    const plan = await client.organizePreview("L1", ["b1"]);
+    expect(plan.books[0].moves).toEqual([]);
+    expect(plan.books[0].skip).toBe(true);
+  });
+
+  it("accepts an organize plan with no books array at all", async () => {
+    mockFetch(() => ({ body: { library_id: "L1", root_path: "/lib" } }));
+    const plan = await client.organizePreview("L1", []);
+    expect(plan.books).toEqual([]);
+  });
 });

@@ -142,7 +142,9 @@ func BuildPlan(database *db.DB, libraryID string, bookIDs []string) (*Plan, erro
 		}
 	}
 
-	plan := &Plan{LibraryID: libraryID, RootPath: lib.RootPath}
+	// Books is non-nil from the start: an empty preview (no matched books, or
+	// none selected) must serialise "books": [] for the UI's validator.
+	plan := &Plan{LibraryID: libraryID, RootPath: lib.RootPath, Books: []BookPlan{}}
 	// target-abs (case-folded) -> bookID that owns it, to detect cross-book
 	// collisions.
 	claimed := map[string]string{}
@@ -189,8 +191,12 @@ func BuildPlan(database *db.DB, libraryID string, bookIDs []string) (*Plan, erro
 
 func planBook(lib model.Library, b model.Book) BookPlan {
 	bp := BookPlan{
-		BookID:        b.ID,
-		Title:         b.Title,
+		BookID: b.ID,
+		Title:  b.Title,
+		// Non-nil so a skipped book (which never reaches the move loop) still
+		// serialises "moves": [] rather than "moves": null — the UI's response
+		// validator requires an array.
+		Moves:         []FileMove{},
 		OldSourceDir:  b.SourceDir,
 		OldSourceFile: b.SourceFile,
 		OldState:      b.State,

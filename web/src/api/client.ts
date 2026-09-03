@@ -456,7 +456,8 @@ function vBookPlan(raw: unknown): BookPlan {
   return {
     book_id: str(o.book_id, "book_plan.book_id"),
     title: looseStr(o.title),
-    moves: arr(o.moves, "book_plan.moves").map(vFileMove),
+    // A skipped book carries no moves; the server may send [] or null/absent.
+    moves: Array.isArray(o.moves) ? o.moves.map(vFileMove) : [],
     skip: looseBool(o.skip),
     reason: optStr(o.reason),
   };
@@ -466,7 +467,9 @@ function vOrganizePlan(raw: unknown): OrganizePlan {
   return {
     library_id: looseStr(o.library_id),
     root_path: looseStr(o.root_path),
-    books: arr(o.books, "organize_plan.books").map(vBookPlan),
+    // An empty preview (nothing selected / nothing matched) legitimately has
+    // no books.
+    books: Array.isArray(o.books) ? o.books.map(vBookPlan) : [],
     conflicts: strArr(o.conflicts),
   };
 }

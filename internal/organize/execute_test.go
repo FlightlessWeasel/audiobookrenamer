@@ -2,6 +2,7 @@ package organize
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -213,6 +214,48 @@ func TestUndo_RestoresPriorOrganizedState(t *testing.T) {
 	}
 	if back.State != model.StateOrganized {
 		t.Fatalf("after undo, state = %s, want organized", back.State)
+	}
+}
+
+// A skipped book must still serialise "moves": [] and the plan "books": [].
+// A nil Go slice marshals to null, and the web client's response validator
+// rejects the whole plan with "book_plan.moves: expected array".
+func TestBuildPlan_SkippedBookMarshalsEmptyArrays(t *testing.T) {
+	d := openTestDB(t)
+	root := t.TempDir()
+	lib, _ := d.CreateLibrary(model.Library{Name: "L", RootPath: root, StructureMode: model.AuthorFirst})
+
+	// Author-first library, matched book with no author -> skipped before the
+	// move loop, so Moves is never appended to.
+	b := matchedBook(t, d, lib, filepath.Join(root, "in"), filepath.Join(root, "in", "x.m4b"),
+		model.LayoutSingle, []string{"x.m4b"}, model.Book{Title: "X", Year: 2020})
+
+	plan, err := BuildPlan(d, lib.ID, []string{b.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Books) != 1 || !plan.Books[0].Skip {
+		t.Fatalf("want one skipped book, got %+v", plan.Books)
+	}
+	if plan.Books[0].Moves == nil {
+		t.Error("skipped book Moves is nil; marshals to null")
+	}
+
+	blob, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(blob), `"moves":null`) {
+		t.Errorf(`plan JSON has "moves":null: %s`, blob)
+	}
+
+	lib2, _ := d.CreateLibrary(model.Library{Name: "L2", RootPath: t.TempDir(), StructureMode: model.AuthorFirst})
+	empty, err := BuildPlan(d, lib2.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.Books == nil {
+		t.Error("empty plan Books is nil; marshals to null")
 	}
 }
 
