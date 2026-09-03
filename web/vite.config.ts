@@ -4,11 +4,16 @@ import react from "@vitejs/plugin-react";
 
 // The build output is written where the Go binary embeds it from
 // (internal/webui/dist). In dev, /api is proxied to the Go server.
+//
+// emptyOutDir is false so the committed `.gitkeep` in that directory survives a
+// build — it is the one tracked file that keeps `//go:embed all:dist` compiling
+// on a checkout that has never run a frontend build. The `prebuild` script
+// clears stale hashed assets/ first, so builds are still clean in practice.
 export default defineConfig({
   plugins: [react()],
   build: {
     outDir: "../internal/webui/dist",
-    emptyOutDir: true,
+    emptyOutDir: false,
   },
   server: {
     port: 5173,

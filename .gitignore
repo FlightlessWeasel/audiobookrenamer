@@ -14,10 +14,14 @@
 /web/node_modules/
 /web/.vite/
 /web/coverage/
-# internal/webui/dist holds the built SPA that gets go:embed-ed. A placeholder
-# index.html is committed so `go build`/`go test` work without a frontend build;
-# `make build` (Vite) regenerates index.html + assets/.
-/internal/webui/dist/assets/
+# internal/webui/dist holds the built SPA that gets go:embed-ed. Only a
+# `.gitkeep` is tracked — enough for `//go:embed all:dist` to compile before a
+# frontend build has run. The real index.html + assets/ are produced by
+# `make build` (Vite) and are build artifacts, not source: their hashed
+# filenames change every build, so committing them would leave the tree dirty
+# and break the goreleaser release step.
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
 
 # Editor / OS
 .DS_Store
