@@ -11,6 +11,7 @@ import {
   groupOptionLabel,
   type GroupBy,
 } from "../lib/groupBooks";
+import { useGroupBy } from "../lib/useGroupBy";
 
 const STATES = ["unmatched", "needs_review", "matched", "organized", "error"] as const;
 
@@ -19,7 +20,7 @@ export function BooksPage() {
   const [libraryId, setLibraryId] = useState("");
   const [state, setState] = useState("");
   const [q, setQ] = useState("");
-  const [groupBy, setGroupBy] = useState<GroupBy>("");
+  const [groupBy, setGroupBy] = useGroupBy();
   // Debounce the search term so typing doesn't fire a listBooks request per
   // keystroke. useAsync still aborts the in-flight request when this changes.
   const debouncedQ = useDebounced(q, 300);

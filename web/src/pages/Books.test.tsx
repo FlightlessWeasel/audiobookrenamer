@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { BooksPage } from "./Books";
@@ -25,7 +25,7 @@ function mount() {
     if (path.startsWith("/books")) return { body: { books, counts: {} } };
     return { status: 404, body: { error: "nope" } };
   });
-  render(
+  return render(
     <MemoryRouter>
       <BooksPage />
     </MemoryRouter>,
@@ -55,6 +55,24 @@ describe("BooksPage grouping", () => {
       "Unknown author1",
       "Zed Author1",
     ]);
+  });
+
+  it("remembers the group-by choice across a remount (tab switch / reload)", async () => {
+    const first = mount();
+    await screen.findByRole("link", { name: "Alpha" });
+    await userEvent.setup().selectOptions(
+      screen.getByRole("combobox", { name: /group books by/i }),
+      "author",
+    );
+    first.unmount();
+    cleanup();
+
+    mount();
+    await screen.findByRole("link", { name: "Alpha" });
+    expect(screen.getByRole("combobox", { name: /group books by/i })).toHaveValue("author");
+    expect(
+      screen.getAllByRole("columnheader").filter((h) => h.getAttribute("colspan") === "6").length,
+    ).toBeGreaterThan(0);
   });
 
   it("groups rows by library", async () => {

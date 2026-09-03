@@ -8,6 +8,7 @@ import {
   groupOptionLabel,
   type GroupBy,
 } from "../lib/groupBooks";
+import { useGroupBy } from "../lib/useGroupBy";
 import { BookPlanCard, planHasRealMoves, planHasWork } from "../components/BookPlanCard";
 
 export function OrganizePage() {
@@ -32,7 +33,7 @@ export function OrganizePage() {
   );
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [groupBy, setGroupBy] = useState<GroupBy>("");
+  const [groupBy, setGroupBy] = useGroupBy();
   const [plan, setPlan] = useState<OrganizePlan | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   // "preview" and "apply" are independent busy flags; the buttons already

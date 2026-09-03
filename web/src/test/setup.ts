@@ -4,7 +4,16 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  // Persisted UI prefs (e.g. the Books/Organize "Group by" choice) would
+  // otherwise leak between tests.
+  try {
+    localStorage.clear();
+  } catch {
+    // no localStorage in this environment
+  }
+});
 
 if (typeof globalThis.structuredClone !== "function") {
   globalThis.structuredClone = (v: unknown) => JSON.parse(JSON.stringify(v));
