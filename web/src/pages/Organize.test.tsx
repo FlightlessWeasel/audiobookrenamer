@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { OrganizePage } from "./Organize";
 import { mockFetch } from "../test/fetchMock";
 
@@ -36,7 +37,7 @@ describe("OrganizePage grouping", () => {
     });
 
     const user = userEvent.setup();
-    render(<OrganizePage />);
+    render(<OrganizePage />, { wrapper: MemoryRouter });
     await waitFor(() => expect(screen.getByText("4 of 4 matched books")).toBeInTheDocument());
 
     await user.selectOptions(screen.getByRole("combobox", { name: /group books by/i }), "author");
@@ -54,6 +55,21 @@ describe("OrganizePage grouping", () => {
   });
 });
 
+describe("OrganizePage book links", () => {
+  it("links each book title to its detail page", async () => {
+    mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) return { body: { books: [book("a1", "A")], counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    render(<OrganizePage />, { wrapper: MemoryRouter });
+    await waitFor(() => expect(screen.getByText("1 of 1 matched books")).toBeInTheDocument());
+
+    expect(screen.getByRole("link", { name: "Book a1" })).toHaveAttribute("href", "/books/a1");
+  });
+});
+
 describe("OrganizePage bulk selection", () => {
   it("toggles every book with the top-level select-all checkbox", async () => {
     mockFetch((path) => {
@@ -65,7 +81,7 @@ describe("OrganizePage bulk selection", () => {
     });
 
     const user = userEvent.setup();
-    render(<OrganizePage />);
+    render(<OrganizePage />, { wrapper: MemoryRouter });
     await waitFor(() => expect(screen.getByText("3 of 3 matched books")).toBeInTheDocument());
 
     const selectAll = screen.getByRole("checkbox", { name: /select all books/i });
@@ -98,7 +114,7 @@ describe("OrganizePage bulk selection", () => {
     });
 
     const user = userEvent.setup();
-    render(<OrganizePage />);
+    render(<OrganizePage />, { wrapper: MemoryRouter });
     await waitFor(() => expect(screen.getByText("3 of 3 matched books")).toBeInTheDocument());
     await user.selectOptions(screen.getByRole("combobox", { name: /group books by/i }), "author");
 
@@ -131,7 +147,7 @@ describe("OrganizePage bulk selection", () => {
       return { status: 404, body: { error: "nope" } };
     });
 
-    render(<OrganizePage />);
+    render(<OrganizePage />, { wrapper: MemoryRouter });
     await waitFor(() => expect(screen.getByText("2 of 2 matched books")).toBeInTheDocument());
 
     expect(screen.getByText("audible")).toBeInTheDocument();
@@ -157,7 +173,7 @@ describe("OrganizePage library switching", () => {
     });
 
     const user = userEvent.setup();
-    render(<OrganizePage />);
+    render(<OrganizePage />, { wrapper: MemoryRouter });
 
     // Library A loads and auto-selects both books.
     await waitFor(() => expect(screen.getByText("2 of 2 matched books")).toBeInTheDocument());
@@ -197,7 +213,7 @@ describe("OrganizePage library switching", () => {
     });
 
     const user = userEvent.setup();
-    render(<OrganizePage />);
+    render(<OrganizePage />, { wrapper: MemoryRouter });
     await waitFor(() => expect(screen.getByText("2 of 2 matched books")).toBeInTheDocument());
 
     await user.click(screen.getByRole("checkbox", { name: /select book a1/i }));
@@ -227,7 +243,7 @@ describe("OrganizePage library switching", () => {
     });
 
     const user = userEvent.setup();
-    render(<OrganizePage />);
+    render(<OrganizePage />, { wrapper: MemoryRouter });
     await waitFor(() => expect(screen.getByText("2 of 2 matched books")).toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: /preview/i }));
@@ -271,7 +287,7 @@ describe("OrganizePage all-no-op plan", () => {
     });
 
     const user = userEvent.setup();
-    render(<OrganizePage />);
+    render(<OrganizePage />, { wrapper: MemoryRouter });
     await waitFor(() => expect(screen.getByText("1 of 1 matched books")).toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: /preview/i }));
@@ -303,7 +319,7 @@ describe("OrganizePage all-no-op plan", () => {
     });
 
     const user = userEvent.setup();
-    render(<OrganizePage />);
+    render(<OrganizePage />, { wrapper: MemoryRouter });
     await waitFor(() => expect(screen.getByText("1 of 1 matched books")).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: /preview/i }));
 

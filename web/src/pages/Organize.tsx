@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { client, type Book, type OrganizePlan } from "../api/client";
 import { useAction } from "../lib/useAction";
 import { useAsync } from "../lib/useAsync";
@@ -303,7 +304,13 @@ function SelectRow({
       <td className="px-3 py-2">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="font-medium">{b.title}</div>
+            <Link
+              to={`/books/${b.id}`}
+              className="font-medium hover:underline"
+              title="Open book details"
+            >
+              {b.title || b.id}
+            </Link>
             <div className="text-xs text-slate-400">
               {b.author}
               {b.series ? ` · ${b.series} ${b.series_index ?? ""}` : ""} · {b.layout}

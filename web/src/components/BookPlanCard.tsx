@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import type { BookPlan, OrganizePlan } from "../api/client";
 
 // One book's planned rename: the before/after for each file, or the reason it
@@ -12,7 +13,13 @@ export function BookPlanCard({ plan }: { plan: BookPlan }) {
       }`}
     >
       <div className="flex items-center justify-between">
-        <span className="font-medium">{plan.title}</span>
+        <Link
+          to={`/books/${plan.book_id}`}
+          className="font-medium hover:underline"
+          title="Open book details"
+        >
+          {plan.title}
+        </Link>
         {plan.skip && <span className="text-xs text-amber-600">skipped — {plan.reason}</span>}
       </div>
       {!plan.skip && (
