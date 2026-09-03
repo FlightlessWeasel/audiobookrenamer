@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 
 	"audiobookrenamer/internal/db"
@@ -858,4 +859,60 @@ func TestExecute_ContainmentGuardRejectsUnsafeMoves(t *testing.T) {
 			t.Fatalf("case-fix move should refuse an out-of-root destination, got: %v", err)
 		}
 	})
+}
+
+// A union or pooled filesystem (mergerfs, mhddfs) — the usual reason a homelab
+// library lives under a "/DataPool" mount — rejects a cross-directory rename
+// with EPERM rather than EXDEV. The move must fall back to copy-then-delete
+// instead of failing the whole organize run and leaving the book at "matched".
+func TestExecute_RenameEPERMFallsBackToCopy(t *testing.T) {
+	orig := renameFile
+	var tripped int
+	renameFile = func(oldpath, newpath string) error {
+		if strings.HasSuffix(oldpath, ".mp3") {
+			tripped++
+			return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: syscall.EPERM}
+		}
+		return orig(oldpath, newpath)
+	}
+	t.Cleanup(func() { renameFile = orig })
+
+	d := openTestDB(t)
+	root := t.TempDir()
+	lib, err := d.CreateLibrary(model.Library{Name: "L", RootPath: root, StructureMode: model.AuthorFirst})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := matchedBook(t, d, lib,
+		filepath.Join(root, "incoming", "Long Night"), "",
+		model.LayoutMulti, []string{"01.mp3", "02.mp3"},
+		model.Book{Title: "The Long Night", Author: "Aaron Dembski-Bowden", Series: "The Horus Heresy", SeriesIndex: "35", Year: 2017},
+	)
+
+	plan, err := BuildPlan(d, lib.ID, []string{b.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := d.CreateJobPayload(model.JobOrganize, lib.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Execute(context.Background(), d, job.ID, plan, nil); err != nil {
+		t.Fatalf("execute should have recovered via the copy fallback: %v", err)
+	}
+	if tripped == 0 {
+		t.Fatal("test never exercised the EPERM rename path")
+	}
+
+	want := filepath.Join(root, "Aaron Dembski-Bowden", "The Horus Heresy", "The Long Night (2017)", "The Long Night (2017) - 02.mp3")
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("expected renamed file at %s: %v", want, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "incoming", "Long Night", "01.mp3")); !os.IsNotExist(err) {
+		t.Error("source file should have been removed after the copy fallback")
+	}
+	if got, _ := d.GetBook(b.ID); got.State != model.StateOrganized {
+		t.Errorf("book state = %s, want organized", got.State)
+	}
 }

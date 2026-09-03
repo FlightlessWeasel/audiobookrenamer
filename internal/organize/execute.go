@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -452,11 +453,31 @@ func doMove(_ /* kind */, src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	err := os.Rename(src, dst)
-	if err != nil && isCrossDevice(err) {
+	err := renameFile(src, dst)
+	if err != nil && renameNeedsCopyFallback(err) {
 		return moveAcrossDevices(src, dst)
 	}
 	return err
+}
+
+// renameFile is os.Rename behind a seam so a test can simulate a filesystem
+// that refuses an in-place rename.
+var renameFile = os.Rename
+
+// renameNeedsCopyFallback reports whether a failed rename should be retried as
+// a copy-then-delete. Both cases mean "these two paths can't be linked in
+// place, but the bytes can still be copied across":
+//
+//   - EXDEV: src and dst are on different filesystems — the classic case of a
+//     library root spanning several bind mounts.
+//   - EPERM: union and pooled filesystems (mergerfs, mhddfs, unionfs) and some
+//     network mounts (CIFS, root-squashed NFS) reject a cross-directory rename
+//     with "operation not permitted" instead of EXDEV.
+//
+// A genuine permission problem on the destination surfaces earlier as a failed
+// MkdirAll, or here as EACCES (not EPERM), so it is not swallowed by this.
+func renameNeedsCopyFallback(err error) bool {
+	return isCrossDevice(err) || errors.Is(err, syscall.EPERM)
 }
 
 // reverseMove puts a file moved src -> dst back at src. It is idempotent: when
