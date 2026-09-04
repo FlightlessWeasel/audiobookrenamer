@@ -65,6 +65,35 @@ describe("LibraryPage edit form", () => {
     await screen.findByText(/queued 1 scan/i);
   });
 
+  it("toggles write_tags / embed_cover and PATCHes them", async () => {
+    let patchBody: Record<string, unknown> = {};
+    mockFetch((path, init) => {
+      if (path === "/libraries" && (!init || init.method === undefined)) return { body: [lib] };
+      if (path === "/libraries/L1" && init?.method === "PATCH") {
+        patchBody = JSON.parse(String(init?.body));
+        return { body: { ...lib, write_tags: true, embed_cover: true } };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(<LibraryPage />);
+
+    await user.click(await screen.findByRole("button", { name: /^edit$/i }));
+
+    const embed = screen.getByRole("checkbox", { name: /embed the cover image/i });
+    expect(embed).toBeDisabled();
+
+    await user.click(screen.getByRole("checkbox", { name: /rewrite audio-file tags/i }));
+    expect(embed).toBeEnabled();
+    await user.click(embed);
+
+    await user.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect("write_tags" in patchBody).toBe(true));
+    expect(patchBody).toMatchObject({ write_tags: true, embed_cover: true });
+  });
+
   it("sends file_template:\"\" when the template field is cleared (reset to default)", async () => {
     let patchBody: Record<string, unknown> = {};
     mockFetch((path, init) => {

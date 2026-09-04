@@ -67,6 +67,7 @@ export function LibraryPage() {
                   {l.author_folder_mode === "name" ? "author name" : "author sort name"}
                   {" · "}
                   {l.enabled ? "enabled" : "disabled"}
+                  {l.write_tags && ` · writing tags${l.embed_cover ? " + cover" : ""}`}
                 </div>
               </div>
               <div className="flex shrink-0 gap-2">
@@ -186,6 +187,49 @@ function TemplateFields({
   );
 }
 
+// TagWritingFields is the opt-in for rewriting embedded audio-file tags during
+// organize. Writing tags mutates the files themselves, so it is off unless
+// chosen; embedding the cover is a sub-option that only applies when tag
+// writing is on.
+function TagWritingFields({
+  writeTags,
+  embedCover,
+  onWriteTags,
+  onEmbedCover,
+}: {
+  writeTags: boolean;
+  embedCover: boolean;
+  onWriteTags: (v: boolean) => void;
+  onEmbedCover: (v: boolean) => void;
+}) {
+  return (
+    <fieldset className="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+      <legend className="text-sm text-slate-500">Embedded tags</legend>
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={writeTags}
+          onChange={(e) => onWriteTags(e.target.checked)}
+        />
+        Rewrite audio-file tags when organizing
+      </label>
+      <label className="flex items-center gap-2 pl-6 text-sm text-slate-600 dark:text-slate-300">
+        <input
+          type="checkbox"
+          checked={embedCover}
+          disabled={!writeTags}
+          onChange={(e) => onEmbedCover(e.target.checked)}
+        />
+        Also embed the cover image
+      </label>
+      <p className="pl-6 text-xs text-slate-400">
+        Off by default — this modifies the audio files, not just their names.
+        mp3, m4a/m4b and flac are supported.
+      </p>
+    </fieldset>
+  );
+}
+
 function EditLibraryForm({ library, onSaved }: { library: Library; onSaved: () => void }) {
   const [name, setName] = useState(library.name);
   const [rootPath, setRootPath] = useState(library.root_path);
@@ -196,6 +240,8 @@ function EditLibraryForm({ library, onSaved }: { library: Library; onSaved: () =
   const [fileTemplate, setFileTemplate] = useState(library.file_template);
   const [multiFileTemplate, setMultiFileTemplate] = useState(library.multi_file_template);
   const [enabled, setEnabled] = useState(library.enabled);
+  const [writeTags, setWriteTags] = useState(library.write_tags);
+  const [embedCover, setEmbedCover] = useState(library.embed_cover);
   const { run, busy: saving, error: err, mounted } = useAction();
 
   function submit(e: React.FormEvent) {
@@ -209,6 +255,8 @@ function EditLibraryForm({ library, onSaved }: { library: Library; onSaved: () =
         file_template: fileTemplate,
         multi_file_template: multiFileTemplate,
         enabled,
+        write_tags: writeTags,
+        embed_cover: writeTags && embedCover,
       });
       if (mounted.current) onSaved();
     });
@@ -255,6 +303,12 @@ function EditLibraryForm({ library, onSaved }: { library: Library; onSaved: () =
         multiFileTemplate={multiFileTemplate}
         onFile={setFileTemplate}
         onMulti={setMultiFileTemplate}
+      />
+      <TagWritingFields
+        writeTags={writeTags}
+        embedCover={embedCover}
+        onWriteTags={setWriteTags}
+        onEmbedCover={setEmbedCover}
       />
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
@@ -357,6 +411,12 @@ function AddLibraryForm({ onAdded }: { onAdded: () => void }) {
         multiFileTemplate={form.multi_file_template ?? ""}
         onFile={(v) => setForm({ ...form, file_template: v })}
         onMulti={(v) => setForm({ ...form, multi_file_template: v })}
+      />
+      <TagWritingFields
+        writeTags={form.write_tags ?? false}
+        embedCover={form.embed_cover ?? false}
+        onWriteTags={(v) => setForm({ ...form, write_tags: v, embed_cover: v ? form.embed_cover : false })}
+        onEmbedCover={(v) => setForm({ ...form, embed_cover: v })}
       />
       {err && <p className="text-sm text-red-600">{err}</p>}
       <div className="flex gap-2">

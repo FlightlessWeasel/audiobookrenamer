@@ -14,6 +14,10 @@ export interface Library {
   file_template: string;
   multi_file_template: string;
   enabled: boolean;
+  // Rewrite embedded audio-file tags during organize; embed_cover additionally
+  // embeds cover art and only applies while write_tags is on. Both default off.
+  write_tags: boolean;
+  embed_cover: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -322,6 +326,8 @@ function vLibrary(raw: unknown): Library {
     file_template: looseStr(o.file_template),
     multi_file_template: looseStr(o.multi_file_template),
     enabled: looseBool(o.enabled, true),
+    write_tags: looseBool(o.write_tags, false),
+    embed_cover: looseBool(o.embed_cover, false),
     created_at: looseStr(o.created_at),
     updated_at: looseStr(o.updated_at),
   };

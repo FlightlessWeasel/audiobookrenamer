@@ -13,17 +13,19 @@ import (
 // ErrNotFound is returned when a lookup by id matches no row.
 var ErrNotFound = errors.New("not found")
 
-const libraryCols = `id, name, root_path, structure_mode, author_folder_mode, file_template, multi_file_template, enabled, created_at, updated_at`
+const libraryCols = `id, name, root_path, structure_mode, author_folder_mode, file_template, multi_file_template, enabled, write_tags, embed_cover, created_at, updated_at`
 
 func scanLibrary(s interface{ Scan(...any) error }) (model.Library, error) {
 	var l model.Library
-	var enabled int
+	var enabled, writeTags, embedCover int
 	var created, updated string
-	err := s.Scan(&l.ID, &l.Name, &l.RootPath, &l.StructureMode, &l.AuthorFolderMode, &l.FileTemplate, &l.MultiFileTemplate, &enabled, &created, &updated)
+	err := s.Scan(&l.ID, &l.Name, &l.RootPath, &l.StructureMode, &l.AuthorFolderMode, &l.FileTemplate, &l.MultiFileTemplate, &enabled, &writeTags, &embedCover, &created, &updated)
 	if err != nil {
 		return model.Library{}, err
 	}
 	l.Enabled = enabled != 0
+	l.WriteTags = writeTags != 0
+	l.EmbedCover = embedCover != 0
 	l.CreatedAt = parseTime(created)
 	l.UpdatedAt = parseTime(updated)
 	return l, nil
@@ -86,8 +88,9 @@ func (d *DB) CreateLibrary(l model.Library) (model.Library, error) {
 	l = normalizeLibrary(l)
 	ts := now()
 	_, err := d.Exec(
-		`INSERT INTO libraries (`+libraryCols+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		l.ID, l.Name, l.RootPath, l.StructureMode, l.AuthorFolderMode, l.FileTemplate, l.MultiFileTemplate, boolToInt(l.Enabled), ts, ts,
+		`INSERT INTO libraries (`+libraryCols+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		l.ID, l.Name, l.RootPath, l.StructureMode, l.AuthorFolderMode, l.FileTemplate, l.MultiFileTemplate,
+		boolToInt(l.Enabled), boolToInt(l.WriteTags), boolToInt(l.EmbedCover), ts, ts,
 	)
 	if err != nil {
 		return model.Library{}, fmt.Errorf("insert library: %w", err)
@@ -103,8 +106,9 @@ func (d *DB) UpdateLibrary(l model.Library) (model.Library, error) {
 	l = normalizeLibrary(l)
 	ts := now()
 	res, err := d.Exec(
-		`UPDATE libraries SET name=?, root_path=?, structure_mode=?, author_folder_mode=?, file_template=?, multi_file_template=?, enabled=?, updated_at=? WHERE id=?`,
-		l.Name, l.RootPath, l.StructureMode, l.AuthorFolderMode, l.FileTemplate, l.MultiFileTemplate, boolToInt(l.Enabled), ts, l.ID,
+		`UPDATE libraries SET name=?, root_path=?, structure_mode=?, author_folder_mode=?, file_template=?, multi_file_template=?, enabled=?, write_tags=?, embed_cover=?, updated_at=? WHERE id=?`,
+		l.Name, l.RootPath, l.StructureMode, l.AuthorFolderMode, l.FileTemplate, l.MultiFileTemplate,
+		boolToInt(l.Enabled), boolToInt(l.WriteTags), boolToInt(l.EmbedCover), ts, l.ID,
 	)
 	if err != nil {
 		return model.Library{}, err

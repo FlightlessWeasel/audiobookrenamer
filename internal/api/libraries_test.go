@@ -76,6 +76,52 @@ func TestUpdateLibrary_OmittedTemplateKept(t *testing.T) {
 	}
 }
 
+// write_tags / embed_cover default off, round-trip through PATCH, and an
+// omitted key leaves the stored value untouched.
+func TestLibrary_TagWritingToggles(t *testing.T) {
+	s := newTestServer(t)
+	lib := seedLibrary(t, s, "")
+	if lib.WriteTags || lib.EmbedCover {
+		t.Fatalf("new library defaults: write_tags=%v embed_cover=%v, want both false", lib.WriteTags, lib.EmbedCover)
+	}
+
+	body := fmt.Sprintf(`{"name":"L","root_path":%q,"write_tags":true,"embed_cover":true}`, lib.RootPath)
+	rr := patchLibrary(t, s, lib.ID, body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", rr.Code, rr.Body.String())
+	}
+	var got model.Library
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.WriteTags || !got.EmbedCover {
+		t.Fatalf("after PATCH: write_tags=%v embed_cover=%v, want both true", got.WriteTags, got.EmbedCover)
+	}
+
+	// Persisted, not just echoed.
+	if reloaded, err := s.DB.GetLibrary(lib.ID); err != nil || !reloaded.WriteTags || !reloaded.EmbedCover {
+		t.Fatalf("reload: %+v err=%v", reloaded, err)
+	}
+
+	// A PATCH that omits the keys keeps them.
+	rr = patchLibrary(t, s, lib.ID, fmt.Sprintf(`{"name":"L","root_path":%q}`, lib.RootPath))
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.WriteTags || !got.EmbedCover {
+		t.Fatalf("omitted keys were cleared: %+v", got)
+	}
+
+	// And write_tags:false turns it back off.
+	rr = patchLibrary(t, s, lib.ID, fmt.Sprintf(`{"name":"L","root_path":%q,"write_tags":false}`, lib.RootPath))
+	if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.WriteTags {
+		t.Fatalf("write_tags still true after PATCH write_tags:false")
+	}
+}
+
 // PATCH with a template referencing an unknown token is rejected (400) so a typo
 // is never baked into filenames.
 func TestUpdateLibrary_BogusTemplateIs400(t *testing.T) {

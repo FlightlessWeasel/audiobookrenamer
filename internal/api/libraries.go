@@ -24,6 +24,8 @@ type libraryInput struct {
 	FileTemplate      *string                 `json:"file_template"`
 	MultiFileTemplate *string                 `json:"multi_file_template"`
 	Enabled           *bool                   `json:"enabled"`
+	WriteTags         *bool                   `json:"write_tags"`
+	EmbedCover        *bool                   `json:"embed_cover"`
 }
 
 func (in libraryInput) validate() (string, bool) {
@@ -120,6 +122,8 @@ func (s *Server) createLibrary(w http.ResponseWriter, r *http.Request) {
 		FileTemplate:      deref(in.FileTemplate),
 		MultiFileTemplate: deref(in.MultiFileTemplate),
 		Enabled:           enabled,
+		WriteTags:         in.WriteTags != nil && *in.WriteTags,
+		EmbedCover:        in.EmbedCover != nil && *in.EmbedCover,
 	})
 	if err != nil {
 		if db.IsUniqueViolation(err) {
@@ -174,6 +178,12 @@ func (s *Server) updateLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	if in.Enabled != nil {
 		existing.Enabled = *in.Enabled
+	}
+	if in.WriteTags != nil {
+		existing.WriteTags = *in.WriteTags
+	}
+	if in.EmbedCover != nil {
+		existing.EmbedCover = *in.EmbedCover
 	}
 	updated, err := s.DB.UpdateLibrary(existing)
 	if err != nil {

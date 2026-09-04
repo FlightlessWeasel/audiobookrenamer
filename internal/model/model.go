@@ -72,8 +72,16 @@ type Library struct {
 	FileTemplate      string           `json:"file_template"`
 	MultiFileTemplate string           `json:"multi_file_template"`
 	Enabled           bool             `json:"enabled"`
-	CreatedAt         time.Time        `json:"created_at"`
-	UpdatedAt         time.Time        `json:"updated_at"`
+
+	// WriteTags rewrites the embedded metadata tags of a book's audio files as
+	// part of organizing it. EmbedCover additionally embeds the cover image;
+	// it has no effect unless WriteTags is set. Both default off — every other
+	// organize step leaves file contents alone.
+	WriteTags  bool `json:"write_tags"`
+	EmbedCover bool `json:"embed_cover"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Book is one audiobook discovered in a library, plus any accepted metadata.
