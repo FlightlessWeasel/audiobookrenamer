@@ -3,8 +3,12 @@ module audiobookrenamer
 go 1.26.7
 
 require (
+	github.com/bogem/id3v2/v2 v2.1.4
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-flac/flacpicture v0.3.0
+	github.com/go-flac/flacvorbis v0.2.0
+	github.com/go-flac/go-flac v1.0.0
 	github.com/google/uuid v1.6.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/text v0.41.0
