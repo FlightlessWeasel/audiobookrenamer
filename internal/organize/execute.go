@@ -353,20 +353,6 @@ func Execute(ctx context.Context, database *db.DB, jobID string, plan *Plan, pro
 	return nil
 }
 
-// Undo reverses a completed organize job. It runs in two passes: first every
-// filesystem step is reversed (newest first), and only if that fully succeeds
-// are the book rows restored. That ordering means a failure partway through
-// leaves the database still describing the organized layout that is (mostly)
-// still on disk, rather than pointing at an original location the files no
-// longer occupy.
-//
-// Undo is idempotent: every step it reverses is flipped to "reverted" in the
-// journal, already-reverted steps are skipped, and a call with nothing left to
-// do returns nil without touching the filesystem. A failed journal update
-// aborts the undo immediately rather than leaving a reversed step still marked
-// "done"; a partially-failed undo can therefore be retried and it re-lists the
-// ops and resumes where it stopped.
-//
 // UndoResult reports the parts of a reversal that could not be fully applied.
 // Neither field is an error: both describe a deliberate, narrow trade-off
 // (never delete user data; never restore tags from a backup a later run has
