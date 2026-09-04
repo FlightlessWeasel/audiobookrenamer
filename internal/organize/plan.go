@@ -13,6 +13,7 @@ import (
 	"audiobookrenamer/internal/model"
 	"audiobookrenamer/internal/pathguard"
 	"audiobookrenamer/internal/strutil"
+	"audiobookrenamer/internal/tagwrite"
 )
 
 // ErrBookNotInLibrary is returned when an organize request references a book
@@ -39,10 +40,11 @@ func ValidateBooks(database *db.DB, libraryID string, bookIDs []string) error {
 type OpKind string
 
 const (
-	OpMkdir   OpKind = "mkdir"   // create Dst
-	OpMove    OpKind = "move"    // rename Src -> Dst
-	OpCaseFix OpKind = "casefix" // rename Src -> Dst differing only by case (two-step)
-	OpRmdir   OpKind = "rmdir"   // remove Dst (an emptied source directory)
+	OpMkdir    OpKind = "mkdir"    // create Dst
+	OpMove     OpKind = "move"     // rename Src -> Dst
+	OpCaseFix  OpKind = "casefix"  // rename Src -> Dst differing only by case (two-step)
+	OpRmdir    OpKind = "rmdir"    // remove Dst (an emptied source directory)
+	OpTagWrite OpKind = "tagwrite" // rewrite Dst's embedded tags; Src is its backup
 )
 
 // Op is one journaled filesystem step. Paths are absolute, native separators.
@@ -68,6 +70,12 @@ type BookPlan struct {
 	Skip   bool       `json:"skip"`
 	Reason string     `json:"reason,omitempty"`
 
+	// TagFiles is the per-file tag-rewrite outcome, populated only when the
+	// library has WriteTags on. It is computed once here and reused verbatim by
+	// Execute, so the preview a user reviewed is exactly what a subsequent
+	// apply does.
+	TagFiles []TagFilePlan `json:"tag_files,omitempty"`
+
 	OldSourceDir  string            `json:"-"`
 	OldSourceFile string            `json:"-"`
 	OldState      model.BookState   `json:"-"` // book state at plan time, restored verbatim on undo
@@ -76,12 +84,41 @@ type BookPlan struct {
 	NewFileRel    map[string]string `json:"-"` // fileID -> new rel_path
 }
 
+// TagFilePlan is the tag-rewrite outcome planned for one file of a book.
+type TagFilePlan struct {
+	// FileRel is the file's current (pre-move) path relative to the library
+	// root, matching the FileMove this file also appears in.
+	FileRel string `json:"file_rel"`
+	// Writable reports whether this container has a tag writer at all. false
+	// means Changed is always false and Reason explains why (an unsupported
+	// format, or a current-tags read failure this app won't write over).
+	Writable bool `json:"writable"`
+	// Changed reports whether the file's current tags differ from what
+	// organize would write. false means Execute leaves the file's tags alone,
+	// same as a NoOp file move.
+	Changed bool   `json:"changed"`
+	Reason  string `json:"reason,omitempty"`
+
+	// FileID and desired are Execute's own bookkeeping: which book_files row
+	// this is, and the exact TagSet planning already computed for it, so
+	// Execute writes precisely what the reviewed preview promised rather than
+	// recomputing (and possibly disagreeing) from a second read.
+	FileID  string `json:"-"`
+	desired tagwrite.TagSet
+}
+
 // Plan is the full set of changes for an organize run.
 type Plan struct {
 	LibraryID string     `json:"library_id"`
 	RootPath  string     `json:"root_path"`
 	Books     []BookPlan `json:"books"`
 	Conflicts []string   `json:"conflicts,omitempty"`
+
+	// BackupDir is where Execute copies a file's pre-write bytes before
+	// rewriting its tags, so Undo can restore them. It is set by the caller
+	// (organize.Service) right before Execute runs; BuildPlan never touches it
+	// and a plan built for preview only never needs it.
+	BackupDir string `json:"-"`
 }
 
 // Changed reports whether the plan has any non-skipped file move.
@@ -165,7 +202,7 @@ func BuildPlan(database *db.DB, libraryID string, bookIDs []string) (*Plan, erro
 				return nil, err
 			}
 		}
-		bp := planBook(lib, b)
+		bp := planBook(database, lib, b)
 
 		// Compute this book's target claims first, then commit them only if the
 		// book survives. A book that ends up skipped must leave `claimed`
@@ -233,7 +270,7 @@ func BuildPlan(database *db.DB, libraryID string, bookIDs []string) (*Plan, erro
 	return plan, nil
 }
 
-func planBook(lib model.Library, b model.Book) BookPlan {
+func planBook(database *db.DB, lib model.Library, b model.Book) BookPlan {
 	bp := BookPlan{
 		BookID: b.ID,
 		Title:  b.Title,
@@ -364,7 +401,59 @@ func planBook(lib model.Library, b model.Book) BookPlan {
 	// state back to organized; a hard skip would exclude it from Execute's
 	// active set and leave it stuck at "matched" forever even though its files
 	// are already exactly where they belong.
+	if lib.WriteTags {
+		bp.TagFiles = planTagFiles(database, lib, b)
+	}
 	return bp
+}
+
+// planTagFiles computes, for every file of b, whether organize would rewrite
+// its embedded tags. It only reads: the file's current tags (if the container
+// has a writer at all) and, when the library also embeds covers, the book's
+// cached cover. Called only when lib.WriteTags is set.
+func planTagFiles(database *db.DB, lib model.Library, b model.Book) []TagFilePlan {
+	var cover []byte
+	var coverMIME string
+	if lib.EmbedCover {
+		// A missing or unreadable cover just means no cover is embedded; it
+		// does not block writing the rest of the tags.
+		if c, ok, err := database.GetBookCover(b.ID); err == nil && ok {
+			cover, coverMIME = c.Data, c.MIME
+		}
+	}
+
+	total := len(b.Files)
+	out := make([]TagFilePlan, len(b.Files))
+	for idx, f := range b.Files {
+		tfp := TagFilePlan{FileID: f.ID, FileRel: mustRel(lib.RootPath, fileAbs(b, f))}
+
+		ext := f.Ext
+		if ext == "" {
+			ext = strings.ToLower(filepath.Ext(f.RelPath))
+		}
+		w, err := tagwrite.WriterFor(ext)
+		if err != nil {
+			tfp.Reason = "tag writing is not supported for " + ext + " files"
+			out[idx] = tfp
+			continue
+		}
+
+		desired := tagwrite.Desired(b, f, total)
+		desired.Cover, desired.CoverMIME = cover, coverMIME
+
+		cur, err := w.Read(fileAbs(b, f))
+		if err != nil {
+			tfp.Reason = "could not read the file's current tags: " + err.Error()
+			out[idx] = tfp
+			continue
+		}
+
+		tfp.Writable = true
+		tfp.Changed = !cur.Equal(desired)
+		tfp.desired = desired
+		out[idx] = tfp
+	}
+	return out
 }
 
 // bookDirSegments is the library-root-relative folder chain a book should live

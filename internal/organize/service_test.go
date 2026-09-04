@@ -27,7 +27,7 @@ func TestService_SerializesApplyAndUndo(t *testing.T) {
 	b2 := matchedBook(t, d, lib, filepath.Join(root, "in2"), filepath.Join(root, "in2", "b.m4b"),
 		model.LayoutSingle, []string{"b.m4b"}, model.Book{Title: "Book Two", Author: "Author Two", Year: 2021})
 
-	svc := NewService(d)
+	svc := NewService(d, t.TempDir())
 
 	var inFlight, maxInFlight int32
 	svc.testHook = func() {
@@ -71,7 +71,7 @@ func TestService_SerializesApplyAndUndo(t *testing.T) {
 // enter must honor context cancellation while the gate is held by someone else,
 // so a queued job that is canceled during shutdown doesn't block forever.
 func TestService_EnterRespectsContextCancel(t *testing.T) {
-	svc := NewService(nil)
+	svc := NewService(nil, "")
 	if err := svc.enter(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestService_Organize_NoOpMoveStillUpdatesState(t *testing.T) {
 		model.Book{Title: "Project Hail Mary", Author: "Andy Weir", Year: 2021},
 	)
 
-	svc := NewService(d)
+	svc := NewService(d, t.TempDir())
 	job1, _ := d.CreateJobPayload(model.JobOrganize, lib.ID, "")
 	if err := svc.organize(context.Background(), job1.ID, lib.ID, []string{b.ID}, nil); err != nil {
 		t.Fatalf("first organize: %v", err)

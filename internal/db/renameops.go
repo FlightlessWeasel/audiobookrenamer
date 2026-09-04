@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"audiobookrenamer/internal/model"
@@ -36,6 +37,30 @@ func (d *DB) InsertRenameOp(jobID string, seq int, kind, src, dst string) (strin
 func (d *DB) MarkRenameOp(id, status, errMsg string) error {
 	_, err := d.Exec(`UPDATE rename_ops SET status=?, error=? WHERE id=?`, status, errMsg, id)
 	return err
+}
+
+// CurrentTagBackupOwner returns the id and backup path (its src column) of the
+// most recent successful ("done") tagwrite op for dst, across every job — not
+// just the one currently running. Only one tag-write backup is ever kept per
+// path: a later tag-write reuses and overwrites the same backup file rather
+// than creating a new one, so an older tagwrite op's own backup reference can
+// be stale. Comparing an op's id against the id this returns is how the
+// executor and Undo tell whether that op is still the one the backup file on
+// disk actually holds; ok is false when no tagwrite op has ever completed for
+// dst (or all have since been reverted).
+func (d *DB) CurrentTagBackupOwner(dst string) (opID, backupPath string, ok bool, err error) {
+	err = d.QueryRow(
+		`SELECT id, src FROM rename_ops WHERE op = ? AND dst = ? AND status = 'done'
+		 ORDER BY rowid DESC LIMIT 1`,
+		"tagwrite", dst,
+	).Scan(&opID, &backupPath)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return opID, backupPath, true, nil
 }
 
 // ListRenameOps returns a job's steps ordered by sequence.

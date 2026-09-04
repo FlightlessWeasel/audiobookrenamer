@@ -20,17 +20,20 @@ import (
 // process-wide. Planning happens inside the gate too, so a concurrent undo
 // can't move files out from under a plan between BuildPlan and Execute.
 type Service struct {
-	db  *db.DB
-	sem chan struct{} // capacity 1: the organize/undo gate
+	db        *db.DB
+	backupDir string        // where a tag-write's pre-write backup is kept; see Plan.BackupDir
+	sem       chan struct{} // capacity 1: the organize/undo gate
 
 	// testHook, when set, runs while the gate is held. Tests use it to prove
 	// two apply/undo runs never overlap.
 	testHook func()
 }
 
-// NewService returns a Service.
-func NewService(database *db.DB) *Service {
-	return &Service{db: database, sem: make(chan struct{}, 1)}
+// NewService returns a Service. backupDir is where a tag-write's pre-write
+// backup is kept (see Plan.BackupDir); it is only created, and only needs to
+// exist, once a library actually has WriteTags on.
+func NewService(database *db.DB, backupDir string) *Service {
+	return &Service{db: database, backupDir: backupDir, sem: make(chan struct{}, 1)}
 }
 
 // Register binds the organize and undo job types.
@@ -92,6 +95,7 @@ func (s *Service) organize(ctx context.Context, jobID, libraryID string, bookIDs
 		}
 		return nil
 	}
+	plan.BackupDir = s.backupDir
 	return Execute(ctx, s.db, jobID, plan, progress)
 }
 
@@ -105,25 +109,30 @@ func (s *Service) runUndo(ctx context.Context, job model.Job, p *worker.Progress
 	}
 	p.Set(0, 1, "reverting "+payload.TargetJobID)
 
-	retained, err := s.undo(ctx, payload.TargetJobID)
+	res, err := s.undo(ctx, payload.TargetJobID)
 	if err != nil {
 		return err
 	}
-	if len(retained) > 0 {
-		p.Set(1, 1, fmt.Sprintf("reverted; kept %d non-empty folder(s): %s",
-			len(retained), strings.Join(retained, "; ")))
+	var notes []string
+	if n := len(res.RetainedDirs); n > 0 {
+		notes = append(notes, fmt.Sprintf("kept %d non-empty folder(s): %s", n, strings.Join(res.RetainedDirs, "; ")))
+	}
+	if n := len(res.UnrestoredTagFiles); n > 0 {
+		notes = append(notes, fmt.Sprintf("could not restore tags for %d file(s), superseded by a later tag-write: %s",
+			n, strings.Join(res.UnrestoredTagFiles, "; ")))
+	}
+	if len(notes) > 0 {
+		p.Set(1, 1, "reverted; "+strings.Join(notes, "; "))
 		return nil
 	}
 	p.Set(1, 1, "reverted")
 	return nil
 }
 
-// undo reverses a completed organize job while holding the organize/undo gate,
-// returning any folders that were retained because the user had added files to
-// them.
-func (s *Service) undo(ctx context.Context, targetJobID string) ([]string, error) {
+// undo reverses a completed organize job while holding the organize/undo gate.
+func (s *Service) undo(ctx context.Context, targetJobID string) (UndoResult, error) {
 	if err := s.enter(ctx); err != nil {
-		return nil, err
+		return UndoResult{}, err
 	}
 	defer s.leave()
 	return Undo(ctx, s.db, targetJobID)

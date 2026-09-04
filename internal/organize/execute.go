@@ -108,7 +108,16 @@ func Execute(ctx context.Context, database *db.DB, jobID string, plan *Plan, pro
 	}
 	rmdirs = uniqueSorted(rmdirs, true) // deep -> shallow
 
-	total := len(mkdirs) + len(moves) + len(rmdirs)
+	tagOps := 0
+	for _, bp := range active {
+		for _, tf := range bp.TagFiles {
+			if tf.Writable && tf.Changed {
+				tagOps++
+			}
+		}
+	}
+
+	total := len(mkdirs) + len(moves) + len(rmdirs) + tagOps
 	seq := 0
 	done := 0
 
@@ -281,6 +290,38 @@ func Execute(ctx context.Context, database *db.DB, jobID string, plan *Plan, pro
 		progress(done, total, "tidying")
 	}
 
+	// Rewrite embedded tags for any file planning found changed, now that
+	// every book sits at its final path. This runs after every move and
+	// before the snapshots/FinalizeOrganize below, so a tag-write failure
+	// rolls back the moves too rather than leaving the library renamed but
+	// only partially retagged.
+	for _, bp := range active {
+		for _, tf := range bp.TagFiles {
+			if !tf.Writable || !tf.Changed {
+				continue
+			}
+			if ctx.Err() != nil {
+				return fail(ctx.Err())
+			}
+			rel, ok := bp.NewFileRel[tf.FileID]
+			if !ok {
+				return fail(fmt.Errorf("tagwrite: %s: file missing from its own planned layout", tf.FileRel))
+			}
+			// NewFileRel is relative to plan.RootPath (the same as a move's
+			// ToRel) until FinalizeOrganize rebases it to be relative to
+			// NewSourceDir for storage in book_files.rel_path.
+			target := filepath.Join(plan.RootPath, filepath.FromSlash(rel))
+			step, err := executeTagWrite(database, jobID, seq, target, tf.desired, plan.BackupDir)
+			if err != nil {
+				return fail(err)
+			}
+			seq++
+			completed = append(completed, step)
+			done++
+			progress(done, total, filepath.Base(target))
+		}
+	}
+
 	// All filesystem steps succeeded — record the snapshots and the new book
 	// locations atomically. If this fails, the filesystem moves are rolled
 	// back so disk and database stay in agreement.
@@ -326,20 +367,46 @@ func Execute(ctx context.Context, database *db.DB, jobID string, plan *Plan, pro
 // "done"; a partially-failed undo can therefore be retried and it re-lists the
 // ops and resumes where it stopped.
 //
-// It returns the list of folders it could not remove during mkdir-reversal
-// because the user had added files to them; those folders are deliberately
-// retained (their contents are never deleted) and the caller can surface them.
-func Undo(ctx context.Context, database *db.DB, jobID string) ([]string, error) {
-	var retainedDirs []string
+// UndoResult reports the parts of a reversal that could not be fully applied.
+// Neither field is an error: both describe a deliberate, narrow trade-off
+// (never delete user data; never restore tags from a backup a later run has
+// since reused) rather than a failure of the undo itself.
+type UndoResult struct {
+	// RetainedDirs lists folders undo could not remove during mkdir-reversal
+	// because the user had added files to them; those folders are kept (their
+	// contents are never deleted).
+	RetainedDirs []string
+	// UnrestoredTagFiles lists files whose tag-write backup had already been
+	// reused by a later tag-write (see db.CurrentTagBackupOwner), so this
+	// undo left their current tags in place instead of restoring the older
+	// ones it had recorded.
+	UnrestoredTagFiles []string
+}
+
+// Undo reverses a completed organize job. It runs in two passes: first every
+// filesystem step is reversed (newest first), and only if that fully succeeds
+// are the book rows restored. That ordering means a failure partway through
+// leaves the database still describing the organized layout that is (mostly)
+// still on disk, rather than pointing at an original location the files no
+// longer occupy.
+//
+// Undo is idempotent: every step it reverses is flipped to "reverted" in the
+// journal, already-reverted steps are skipped, and a call with nothing left to
+// do returns nil without touching the filesystem. A failed journal update
+// aborts the undo immediately rather than leaving a reversed step still marked
+// "done"; a partially-failed undo can therefore be retried and it re-lists the
+// ops and resumes where it stopped.
+func Undo(ctx context.Context, database *db.DB, jobID string) (UndoResult, error) {
+	var res UndoResult
 
 	ops, err := database.ListRenameOps(jobID)
 	if err != nil {
-		return nil, err
+		return res, err
 	}
 
 	// Nothing left to reverse? Then a repeat call is a no-op.
 	if !undoPending(ops) {
-		return nil, nil
+		return res, nil
 	}
 
 	// markReverted flips a step to "reverted" once its filesystem effect has
@@ -357,7 +424,7 @@ func Undo(ctx context.Context, database *db.DB, jobID string) ([]string, error) 
 	// re-run skips anything already "reverted".
 	for i := len(ops) - 1; i >= 0; i-- {
 		if ctx.Err() != nil {
-			return retainedDirs, ctx.Err()
+			return res, ctx.Err()
 		}
 		o := ops[i]
 		if o.Status != "done" {
@@ -371,32 +438,50 @@ func Undo(ctx context.Context, database *db.DB, jobID string) ([]string, error) 
 			// interrupted between the two). Treat it as already reversed and
 			// carry on rather than aborting the entire undo on it.
 			if err := reverseMove(o.Src, o.Dst); err != nil {
-				return retainedDirs, fmt.Errorf("undo move %s -> %s: %w", o.Dst, o.Src, err)
+				return res, fmt.Errorf("undo move %s -> %s: %w", o.Dst, o.Src, err)
 			}
 			if err := markReverted(o.ID); err != nil {
-				return retainedDirs, err
+				return res, err
 			}
 		case string(OpMkdir):
 			// Best-effort: os.Remove only succeeds on an empty dir. If the
 			// user dropped files into a folder this organize run created, the
 			// folder is left in place — deleting it would take their data with
-			// it. It is reported via retainedDirs instead.
+			// it. It is reported via RetainedDirs instead.
 			// TODO: only the folder path is reported, not an inventory of the
 			// files kept inside it; there is no per-file "retained" report.
 			if rmErr := os.Remove(o.Dst); rmErr != nil && !os.IsNotExist(rmErr) {
-				retainedDirs = append(retainedDirs, o.Dst)
+				res.RetainedDirs = append(res.RetainedDirs, o.Dst)
 				slog.Warn("undo kept a non-empty folder created by organize",
 					"job", jobID, "dir", o.Dst, "err", rmErr)
 			}
 			if err := markReverted(o.ID); err != nil {
-				return retainedDirs, err
+				return res, err
 			}
 		case string(OpRmdir):
 			if err := os.MkdirAll(o.Dst, 0o755); err != nil {
-				return retainedDirs, fmt.Errorf("undo rmdir %s: %w", o.Dst, err)
+				return res, fmt.Errorf("undo rmdir %s: %w", o.Dst, err)
 			}
 			if err := markReverted(o.ID); err != nil {
-				return retainedDirs, err
+				return res, err
+			}
+		case string(OpTagWrite):
+			isOwner, err := restoreTagFile(database, o.ID, o.Src, o.Dst)
+			if err != nil {
+				return res, fmt.Errorf("undo tagwrite %s: %w", o.Dst, err)
+			}
+			if !isOwner {
+				res.UnrestoredTagFiles = append(res.UnrestoredTagFiles, o.Dst)
+				slog.Warn("undo could not restore tags: backup was reused by a later tag-write",
+					"job", jobID, "file", o.Dst)
+			}
+			if err := markReverted(o.ID); err != nil {
+				return res, err
+			}
+			if isOwner {
+				if rmErr := os.Remove(o.Src); rmErr != nil && !os.IsNotExist(rmErr) {
+					slog.Warn("could not remove consumed tag backup", "path", o.Src, "err", rmErr)
+				}
 			}
 		}
 	}
@@ -409,16 +494,16 @@ func Undo(ctx context.Context, database *db.DB, jobID string) ([]string, error) 
 		}
 		var snap bookSnapshot
 		if err := json.Unmarshal([]byte(o.Dst), &snap); err != nil {
-			return retainedDirs, err
+			return res, err
 		}
 		if err := database.RestoreBookSnapshot(snap.BookID, snap.SourceDir, snap.SourceFile, snap.State, snap.FileRel); err != nil {
-			return retainedDirs, err
+			return res, err
 		}
 		if err := markReverted(o.ID); err != nil {
-			return retainedDirs, err
+			return res, err
 		}
 	}
-	return retainedDirs, nil
+	return res, nil
 }
 
 // undoPending reports whether a job still has any journal step to reverse: a
@@ -627,6 +712,24 @@ func rollback(database *db.DB, completed []completedStep) []error {
 		case string(OpRmdir):
 			if err = os.MkdirAll(c.dst, 0o755); err != nil {
 				err = fmt.Errorf("recreate pruned dir %s: %w", c.dst, err)
+			}
+		case string(OpTagWrite):
+			// completed holds only steps this same, still-running Execute just
+			// performed, and the organize/undo gate (Service.sem) guarantees
+			// nothing else can have touched this path meanwhile — so unlike
+			// Undo's reversal of a possibly old, separate job, isOwner here
+			// should always be true. A false one still isn't treated as a hard
+			// rollback failure (the rest of the job needs to keep unwinding),
+			// but it is logged loudly: it means a tag-write this run itself just
+			// made is being left in place.
+			isOwner, rerr := restoreTagFile(database, c.opID, c.src, c.dst)
+			if rerr != nil {
+				err = fmt.Errorf("restore tags for %s: %w", c.dst, rerr)
+			} else if !isOwner {
+				slog.Error("rollback could not restore tags it just wrote: backup ownership already lost",
+					"op", c.opID, "file", c.dst)
+			} else if rmErr := os.Remove(c.src); rmErr != nil && !os.IsNotExist(rmErr) {
+				slog.Warn("could not remove consumed tag backup", "path", c.src, "err", rmErr)
 			}
 		}
 		if err != nil {

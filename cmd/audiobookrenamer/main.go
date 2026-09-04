@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -58,7 +59,8 @@ func run() error {
 	registry := metadata.NewRegistry(database)
 	mm := matcher.New(database, registry, metadata.NewClient(database))
 	matcher.Register(wm, mm)
-	organize.Register(wm, organize.NewService(database))
+	tagBackupDir := filepath.Join(cfg.ConfigDir, "tagbackups")
+	organize.Register(wm, organize.NewService(database, tagBackupDir))
 
 	apiSrv, err := api.New(cfg, database, wm, mm)
 	if err != nil {
