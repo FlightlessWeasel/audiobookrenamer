@@ -2,9 +2,10 @@
 
 A self-hosted web app for keeping an audiobook library organized — the library
 side of Radarr/Sonarr, with **no download features**. It scans a folder,
-matches books to online metadata (Audible, Google Books, Open Library), and
-renames files and folders **in place** to a consistent layout that downstream
-tools such as Audiobookshelf expect.
+matches books to online metadata (Audible, Google Books, Open Library), renames
+files and folders **in place** to a consistent layout that downstream tools
+such as Audiobookshelf expect, and can also rewrite each audio file's own
+embedded tags to match, opt-in per library.
 
 ## Features
 
@@ -15,6 +16,8 @@ tools such as Audiobookshelf expect.
 - Rename in place to a configurable token template, after reviewing a dry-run
   diff. Every run is journaled and can be undone, including a run that failed
   partway and could not fully roll itself back.
+- Optionally rewrite each file's embedded tags, and cover art, to match the
+  accepted metadata (see [Tag writing](#tag-writing)).
 - Optional login (off by default) plus an API key for automation.
 - Single static binary with the web UI embedded; Docker image and `.deb`
   package available.
@@ -45,6 +48,49 @@ Windows, 1024 elsewhere) so the renamed library stays readable by Explorer and
 by downstream scanners. Folder names are shortened to fit; file names are never
 truncated, and a book whose path cannot be made to fit is skipped with that
 reason shown in the preview.
+
+## Tag writing
+
+Off by default, per library (Library → Rewrite audio-file tags when
+organizing, plus a sub-option to also embed the cover). Renaming only ever
+touches file *names*; turning this on also rewrites the accepted metadata into
+each file's own embedded tags the next time it is organized.
+
+It's a full rewrite, not a merge. Every existing tag is discarded and replaced
+with exactly the fields below, so a stray tag from a previous rip or tagger
+never survives. A file whose tags already match what would be written is left
+untouched, the same no-op guarantee a file already at its target path gets
+from renaming.
+
+Supported: `.mp3` (ID3v2.4), `.m4b`/`.m4a` (the iTunes `moov/udta/meta/ilst`
+atoms), `.flac` (Vorbis comments). Not supported: `.ogg`, `.opus`, `.aac`,
+`.wav` (no dependable tag writer exists for these). Such files are still
+renamed normally; the preview flags that their tags are left alone.
+
+| Field | ID3v2.4 (mp3) | MP4 (m4b/m4a) | Vorbis (flac) |
+|---|---|---|---|
+| Title (album) | `TALB` | `©alb` | `ALBUM` |
+| Track title | `TIT2` | `©nam` | `TITLE` |
+| Author | `TPE1` | `©ART` / `aART` | `ARTIST` / `ALBUMARTIST` |
+| Narrator | `TCOM` + `TXXX:NARRATOR` | `©wrt` + `----:NARRATOR` | `COMPOSER` |
+| Series / index | `TXXX:SERIES` / `TXXX:SERIES-PART` | `----:SERIES` / `----:SERIES-PART` | `SERIES` / `SERIES-PART` |
+| Subtitle | `TXXX:SUBTITLE` | `----:SUBTITLE` | `SUBTITLE` |
+| Year | `TDRC` | `©day` | `DATE` |
+| ASIN / ISBN | `TXXX:ASIN` / `TXXX:ISBN` | `----:ASIN` / `----:ISBN` | `ASIN` / `ISBN` |
+| Track / total | `TRCK` | `trkn` | `TRACKNUMBER` / `TRACKTOTAL` |
+| Genre | `TCON` = "Audiobook" | `©gen` = "Audiobook" | `GENRE` = "Audiobook" |
+| Cover | `APIC` | `covr` | `METADATA_BLOCK_PICTURE` |
+
+Every write goes through a temporary file that's fsynced before it replaces
+the original, so a crash mid-write never leaves a corrupted file. It's either
+still the old tags, or fully the new ones.
+
+Before the first rewrite of a given file, its current bytes are copied to a
+backup so the run can be undone. Only the most recent backup per file is kept:
+undoing an old run after a newer one has already retagged the same file still
+reverses that run's file move, but can't restore its tags anymore (the newer
+run's tags stand). The undo result reports which files that happened to,
+rather than silently applying the wrong ones.
 
 ## Running
 

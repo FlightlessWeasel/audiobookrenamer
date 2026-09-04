@@ -1,5 +1,6 @@
-// Package organize renders library naming templates, plans in-place renames as
-// a reviewable diff, and executes them with a journal that supports undo.
+// Package organize renders library naming templates, plans in-place renames
+// (optionally including an embedded-tag rewrite) as a reviewable diff, and
+// executes them with a journal that supports undo.
 package organize
 
 import (
