@@ -50,7 +50,7 @@ func seedBook(t *testing.T, d *db.DB) model.Book {
 
 func newMatcher(d *db.DB, cands ...model.Candidate) *Matcher {
 	reg := metadata.NewRegistryWithProviders(d, &stubProvider{name: "stub", out: cands})
-	return New(d, reg)
+	return New(d, reg, metadata.NewClient(d))
 }
 
 // A match that sets the author must also populate a DERIVED author_sort

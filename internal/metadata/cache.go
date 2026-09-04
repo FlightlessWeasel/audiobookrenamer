@@ -76,43 +76,51 @@ func (c *Client) GetJSON(ctx context.Context, provider, reqURL string, headers m
 }
 
 func (c *Client) fetch(ctx context.Context, reqURL string, headers map[string]string) ([]byte, error) {
+	data, _, err := c.get(ctx, reqURL, "application/json", headers, 8<<20)
+	return data, err
+}
+
+// get performs the throttled, user-agented GET shared by every Client method:
+// JSON provider calls (fetch, 8 MiB cap) and cover-image downloads (FetchImage,
+// its own cap). It returns the body and the response's Content-Type.
+func (c *Client) get(ctx context.Context, reqURL, accept string, headers map[string]string, maxBytes int64) ([]byte, string, error) {
 	u, err := url.Parse(reqURL)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err := c.throttle(ctx, u.Host); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	req.Header.Set("User-Agent", c.userAgent)
-	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Accept", accept)
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 	// Drain any remainder so the keep-alive connection can be reused.
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if resp.StatusCode != http.StatusOK {
 		snippet := data
 		if len(snippet) > 200 {
 			snippet = snippet[:200]
 		}
-		return nil, fmt.Errorf("%s -> %d: %s", u.Host, resp.StatusCode, snippet)
+		return nil, "", fmt.Errorf("%s -> %d: %s", u.Host, resp.StatusCode, snippet)
 	}
-	return data, nil
+	return data, resp.Header.Get("Content-Type"), nil
 }
 
 // throttle enforces a minimum gap between requests to the same host. It computes

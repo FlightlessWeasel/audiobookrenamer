@@ -56,7 +56,7 @@ func run() error {
 	scanner.Register(wm, database)
 
 	registry := metadata.NewRegistry(database)
-	mm := matcher.New(database, registry)
+	mm := matcher.New(database, registry, metadata.NewClient(database))
 	matcher.Register(wm, mm)
 	organize.Register(wm, organize.NewService(database))
 

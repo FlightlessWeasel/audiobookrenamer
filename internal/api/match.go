@@ -72,7 +72,7 @@ func (s *Server) matchBook(w http.ResponseWriter, r *http.Request) {
 		if m.Narrator != "" {
 			c.Narrators = []string{m.Narrator}
 		}
-		book, err := s.Matcher.AcceptCandidate(id, c)
+		book, err := s.Matcher.AcceptCandidate(r.Context(), id, c)
 		if err != nil {
 			writeDBErr(w, err)
 			return
@@ -80,7 +80,7 @@ func (s *Server) matchBook(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, matchResponse{Book: book})
 
 	case req.Provider != "" && req.ProviderID != "":
-		book, err := s.Matcher.AcceptStored(id, req.Provider, req.ProviderID)
+		book, err := s.Matcher.AcceptStored(r.Context(), id, req.Provider, req.ProviderID)
 		if err != nil {
 			writeDBErr(w, err)
 			return

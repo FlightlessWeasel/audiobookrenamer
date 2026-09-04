@@ -26,7 +26,7 @@ func (p *fakeProvider) Search(context.Context, metadata.Query) ([]model.Candidat
 func serverWithProviders(t *testing.T, providers ...metadata.Provider) *Server {
 	t.Helper()
 	s := newTestServer(t)
-	s.Matcher = matcher.New(s.DB, metadata.NewRegistryWithProviders(s.DB, providers...))
+	s.Matcher = matcher.New(s.DB, metadata.NewRegistryWithProviders(s.DB, providers...), metadata.NewClient(s.DB))
 	return s
 }
 

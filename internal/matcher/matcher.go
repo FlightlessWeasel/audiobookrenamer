@@ -6,6 +6,7 @@ package matcher
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"audiobookrenamer/internal/db"
@@ -18,13 +19,14 @@ import (
 
 // Matcher couples the provider registry with the database.
 type Matcher struct {
-	db  *db.DB
-	reg *metadata.Registry
+	db     *db.DB
+	reg    *metadata.Registry
+	covers *metadata.Client // fetches a candidate's cover_url; see fetchCover
 }
 
 // New builds a Matcher.
-func New(database *db.DB, reg *metadata.Registry) *Matcher {
-	return &Matcher{db: database, reg: reg}
+func New(database *db.DB, reg *metadata.Registry, covers *metadata.Client) *Matcher {
+	return &Matcher{db: database, reg: reg, covers: covers}
 }
 
 // Register wires the bulk "match a library" job.
@@ -67,6 +69,9 @@ func (m *Matcher) MatchBook(ctx context.Context, bookID string) (model.Book, []m
 	}
 	if pick, ok := matching.AutoPick(ranked, threshold); ok {
 		updated, err := m.apply(book, pick)
+		if err == nil {
+			m.fetchCover(ctx, updated)
+		}
 		return updated, ranked, err
 	}
 
@@ -101,7 +106,10 @@ type AcceptOutcome struct {
 // It never calls a provider: it only acts on candidates a previous match run
 // stored, which is what makes it cheap enough to run synchronously and what
 // makes it the way to clear a review backlog at a lower bar than the standing
-// auto-match threshold.
+// auto-match threshold. For the same reason it does not fetch a cover either
+// — apply already clears a now-stale cached cover, so a book accepted this way
+// simply organizes without an embedded cover until it is next matched through
+// a path that does fetch one (MatchBook, or a manual accept).
 //
 // Unlike MatchBook it applies a plain score bar, without AutoPick's
 // runner-up-margin guard. That guard is deliberately skipped: books held back
@@ -150,8 +158,8 @@ func (m *Matcher) Search(ctx context.Context, q metadata.Query, provider string)
 }
 
 // AcceptStored applies a previously stored candidate (by provider + id) to the
-// book and marks it matched.
-func (m *Matcher) AcceptStored(bookID, provider, providerID string) (model.Book, error) {
+// book, marks it matched, and fetches its cover.
+func (m *Matcher) AcceptStored(ctx context.Context, bookID, provider, providerID string) (model.Book, error) {
 	book, err := m.db.GetBookBare(bookID)
 	if err != nil {
 		return model.Book{}, err
@@ -160,17 +168,25 @@ func (m *Matcher) AcceptStored(bookID, provider, providerID string) (model.Book,
 	if err != nil {
 		return model.Book{}, err
 	}
-	return m.apply(book, c)
+	updated, err := m.apply(book, c)
+	if err == nil {
+		m.fetchCover(ctx, updated)
+	}
+	return updated, err
 }
 
 // AcceptCandidate applies an arbitrary candidate (e.g. from a manual search or
-// hand-entered fields) to the book.
-func (m *Matcher) AcceptCandidate(bookID string, c model.Candidate) (model.Book, error) {
+// hand-entered fields) to the book and fetches its cover.
+func (m *Matcher) AcceptCandidate(ctx context.Context, bookID string, c model.Candidate) (model.Book, error) {
 	book, err := m.db.GetBookBare(bookID)
 	if err != nil {
 		return model.Book{}, err
 	}
-	return m.apply(book, c)
+	updated, err := m.apply(book, c)
+	if err == nil {
+		m.fetchCover(ctx, updated)
+	}
+	return updated, err
 }
 
 // apply copies candidate fields onto the book, sets provenance, marks it
@@ -207,7 +223,52 @@ func (m *Matcher) apply(book model.Book, c model.Candidate) (model.Book, error) 
 	if err := m.db.SetBookMatch(book.ID, book); err != nil {
 		return model.Book{}, err
 	}
+	m.invalidateStaleCover(book.ID, book.CoverURL)
 	return book, nil
+}
+
+// invalidateStaleCover deletes a book's cached cover the moment it no longer
+// matches the just-applied candidate's cover_url (including when the new
+// candidate has none at all). It is cheap — an indexed lookup and, rarely, a
+// delete — and runs for every caller of apply, including AcceptTopCandidates,
+// which fetches nothing itself. That is what makes "a book_covers row exists"
+// a safe stand-in for "it is fresh for this book's current cover_url"
+// throughout the rest of the app, in particular for organize's cover-embed
+// step: it can trust any row it finds without re-checking the source URL.
+func (m *Matcher) invalidateStaleCover(bookID, coverURL string) {
+	cur, ok, err := m.db.GetBookCover(bookID)
+	if err != nil {
+		slog.Warn("cover lookup failed", "book", bookID, "err", err)
+		return
+	}
+	if ok && cur.SourceURL != coverURL {
+		if err := m.db.DeleteBookCover(bookID); err != nil {
+			slog.Warn("could not clear stale cover", "book", bookID, "err", err)
+		}
+	}
+}
+
+// fetchCover downloads and caches the cover for book.CoverURL, if it is not
+// already cached. Failure is logged, not returned: a cover is an enhancement
+// to organize's optional embed-cover step, never a reason to fail a match.
+func (m *Matcher) fetchCover(ctx context.Context, book model.Book) {
+	if book.CoverURL == "" {
+		return // apply already cleared any stale row
+	}
+	if _, ok, err := m.db.GetBookCover(book.ID); err != nil {
+		slog.Warn("cover lookup failed", "book", book.ID, "err", err)
+		return
+	} else if ok {
+		return // invalidateStaleCover guarantees a row here is already fresh
+	}
+	data, mime, err := m.covers.FetchImage(ctx, book.CoverURL)
+	if err != nil {
+		slog.Warn("cover fetch failed", "book", book.ID, "url", book.CoverURL, "err", err)
+		return
+	}
+	if err := m.db.SetBookCover(book.ID, mime, data, book.CoverURL); err != nil {
+		slog.Warn("could not store cover", "book", book.ID, "err", err)
+	}
 }
 
 func (m *Matcher) runLibraryJob(ctx context.Context, job model.Job, p *worker.Progress) error {
