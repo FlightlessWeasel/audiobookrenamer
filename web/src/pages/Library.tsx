@@ -42,6 +42,7 @@ export function LibraryPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Libraries</h1>
+        <RescanAllButton />
       </div>
 
       <AddLibraryForm onAdded={libs.reload} />
@@ -114,6 +115,41 @@ export function LibraryPage() {
           <p className="text-sm text-slate-500">No libraries yet. Add one above.</p>
         )}
       </div>
+    </div>
+  );
+}
+
+// RescanAllButton enqueues a scan for every enabled library in one click — a
+// scan is what reconciles the database with what is on disk.
+function RescanAllButton() {
+  const { run, busy, error, mounted } = useAction();
+  const [msg, setMsg] = useState<string | null>(null);
+
+  function go() {
+    setMsg(null);
+    run(async () => {
+      const res = await client.rescanAllLibraries();
+      if (!mounted.current) return;
+      const n = res.jobs.length;
+      setMsg(
+        n === 0
+          ? "No enabled libraries to scan."
+          : `Queued ${n} scan${n === 1 ? "" : "s"} — watch the Activity tab.`,
+      );
+    });
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {msg && <span className="text-xs text-slate-500">{msg}</span>}
+      {error && <span className="text-xs text-red-600">{error}</span>}
+      <button
+        onClick={go}
+        disabled={busy}
+        className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-slate-700"
+      >
+        {busy ? "Queuing…" : "Rescan all"}
+      </button>
     </div>
   );
 }

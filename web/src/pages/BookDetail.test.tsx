@@ -277,3 +277,54 @@ describe("BookDetail organize panel", () => {
     expect(screen.getByRole("button", { name: /preview rename/i })).toBeDisabled();
   });
 });
+
+describe("BookDetail delete", () => {
+  it("DELETEs the book and navigates back to the list once confirmed", async () => {
+    vi.stubGlobal("confirm", () => true);
+    let deleteCalled = false;
+    mockFetch((path, init) => {
+      if (path === "/books/b1" && (!init || init.method === undefined)) return { body: book };
+      if (path === "/books/b1/candidates") return { body: [] };
+      if (path === "/settings") return { body: settings };
+      if (path === "/books/b1" && init?.method === "DELETE") {
+        deleteCalled = true;
+        return { status: 204 };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/books/b1"]}>
+        <Routes>
+          <Route path="/books/:id" element={<BookDetailPage />} />
+          <Route path="/books" element={<div>book list</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole("button", { name: /^delete$/i }));
+
+    await waitFor(() => expect(deleteCalled).toBe(true));
+    expect(await screen.findByText("book list")).toBeInTheDocument();
+  });
+
+  it("does nothing when the confirm is dismissed", async () => {
+    vi.stubGlobal("confirm", () => false);
+    const fetchFn = mockFetch((path, init) => {
+      if (path === "/books/b1" && (!init || init.method === undefined)) return { body: book };
+      if (path === "/books/b1/candidates") return { body: [] };
+      if (path === "/settings") return { body: settings };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    renderBookDetail();
+
+    await user.click(await screen.findByRole("button", { name: /^delete$/i }));
+
+    expect(
+      fetchFn.mock.calls.some(([u, i]) => String(u).endsWith("/books/b1") && (i as RequestInit)?.method === "DELETE"),
+    ).toBe(false);
+  });
+});

@@ -11,6 +11,7 @@ import (
 
 	"audiobookrenamer/internal/db"
 	"audiobookrenamer/internal/model"
+	"audiobookrenamer/internal/pathguard"
 	"audiobookrenamer/internal/strutil"
 )
 
@@ -323,7 +324,7 @@ func planBook(lib model.Library, b model.Book) BookPlan {
 		toAbs := filepath.Join(lib.RootPath, filepath.FromSlash(toRel))
 		noOp := filepath.Clean(fromAbs) == filepath.Clean(toAbs)
 
-		if !resolvedWithinRoot(lib.RootPath, fromAbs) || !resolvedWithinRoot(lib.RootPath, toAbs) {
+		if !pathguard.ResolvedWithinRoot(lib.RootPath, fromAbs) || !pathguard.ResolvedWithinRoot(lib.RootPath, toAbs) {
 			bp.Skip, bp.Reason = true, "resolved path escapes the library root"
 			return bp
 		}

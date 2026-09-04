@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { errorMessage } from "../lib/errorMessage";
 import {
   client,
@@ -43,6 +43,7 @@ function candidateToManual(c: Candidate): ManualMatch {
 
 export function BookDetailPage() {
   const { id = "" } = useParams();
+  const navigate = useNavigate();
   const book = useAsync((signal) => client.getBook(id, { signal }), [id]);
   const stored = useAsync(
     (signal) => client.listCandidates(id, { signal }),
@@ -82,6 +83,22 @@ export function BookDetailPage() {
       if (res.candidates) stored.reload();
       book.reload();
     }, "auto");
+  }
+
+  function del() {
+    const b = book.data;
+    const name = b?.title || b?.source_file || b?.source_dir || "this book";
+    if (
+      !confirm(
+        `Permanently delete ${name}?\n\nThe audio files are removed from disk and the record from the database. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    run(async () => {
+      await client.deleteBook(id);
+      if (mounted.current) navigate("/books");
+    }, "delete");
   }
 
   function accept(c: Candidate) {
@@ -131,13 +148,22 @@ export function BookDetailPage() {
             {b.source_file || b.source_dir}
           </p>
         </div>
-        <button
-          onClick={auto}
-          disabled={isBusy("auto")}
-          className="shrink-0 rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
-        >
-          {isBusy("auto") ? "Matching…" : "Auto-match"}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          <button
+            onClick={auto}
+            disabled={isBusy("auto") || isBusy("delete")}
+            className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:bg-slate-100 dark:text-slate-900"
+          >
+            {isBusy("auto") ? "Matching…" : "Auto-match"}
+          </button>
+          <button
+            onClick={del}
+            disabled={isBusy("auto") || isBusy("delete")}
+            className="rounded border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 disabled:opacity-50 dark:border-red-800 dark:text-red-400"
+          >
+            {isBusy("delete") ? "Deleting…" : "Delete"}
+          </button>
+        </div>
       </div>
 
       {err && (

@@ -49,7 +49,7 @@ describe("BooksPage grouping", () => {
     );
 
     const headers = await screen.findAllByRole("columnheader");
-    const groupHeaders = headers.filter((h) => h.getAttribute("colspan") === "6");
+    const groupHeaders = headers.filter((h) => h.getAttribute("colspan") === "7");
     expect(groupHeaders.map((h) => h.textContent)).toEqual([
       "Amy Author2",
       "Unknown author1",
@@ -71,7 +71,7 @@ describe("BooksPage grouping", () => {
     await screen.findByRole("link", { name: "Alpha" });
     expect(screen.getByRole("combobox", { name: /group books by/i })).toHaveValue("author");
     expect(
-      screen.getAllByRole("columnheader").filter((h) => h.getAttribute("colspan") === "6").length,
+      screen.getAllByRole("columnheader").filter((h) => h.getAttribute("colspan") === "7").length,
     ).toBeGreaterThan(0);
   });
 
@@ -86,8 +86,59 @@ describe("BooksPage grouping", () => {
 
     await waitFor(() =>
       expect(
-        screen.getAllByRole("columnheader").filter((h) => h.getAttribute("colspan") === "6").map((h) => h.textContent),
+        screen.getAllByRole("columnheader").filter((h) => h.getAttribute("colspan") === "7").map((h) => h.textContent),
       ).toEqual(["Lib One2", "Lib Two2"]),
     );
+  });
+});
+
+describe("BooksPage bulk delete", () => {
+  it("posts the selected ids to /books/delete and reloads", async () => {
+    vi.stubGlobal("confirm", () => true);
+    const fetchFn = mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path === "/books/delete") return { body: { deleted: 2 } };
+      if (path.startsWith("/books")) return { body: { books, counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+
+    const user = userEvent.setup();
+    await screen.findByRole("link", { name: "Alpha" });
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Bravo" }));
+    await user.click(screen.getByRole("button", { name: /delete selected/i }));
+
+    await waitFor(() => {
+      const call = fetchFn.mock.calls.find(([u]) => String(u).endsWith("/books/delete"));
+      expect(call).toBeTruthy();
+      expect(JSON.parse(call![1]!.body as string)).toEqual({ ids: ["b1", "b2"] });
+    });
+    await screen.findByText("Deleted 2 books.");
+  });
+
+  it("does not call the endpoint when the confirm is dismissed", async () => {
+    vi.stubGlobal("confirm", () => false);
+    const fetchFn = mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) return { body: { books, counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+    const user = userEvent.setup();
+    await screen.findByRole("link", { name: "Alpha" });
+    await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+    await user.click(screen.getByRole("button", { name: /delete selected/i }));
+
+    expect(fetchFn.mock.calls.some(([u]) => String(u).endsWith("/books/delete"))).toBe(false);
   });
 });

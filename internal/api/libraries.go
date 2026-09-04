@@ -191,6 +191,35 @@ func (s *Server) deleteLibrary(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+type rescanAllResponse struct {
+	Jobs []model.Job `json:"jobs"`
+}
+
+// rescanAllLibraries enqueues a scan for every enabled library in one call. A
+// scan already reconciles the database with disk — new books are added, books
+// whose folders are gone are pruned — so this is the "rescan everything"
+// action. Disabled libraries are skipped.
+func (s *Server) rescanAllLibraries(w http.ResponseWriter, r *http.Request) {
+	libs, err := s.DB.ListLibraries()
+	if err != nil {
+		writeDBErr(w, err)
+		return
+	}
+	jobs := []model.Job{}
+	for _, l := range libs {
+		if !l.Enabled {
+			continue
+		}
+		job, err := s.Worker.Enqueue(model.JobScan, l.ID)
+		if err != nil {
+			writeDBErr(w, err)
+			return
+		}
+		jobs = append(jobs, job)
+	}
+	writeJSON(w, http.StatusAccepted, rescanAllResponse{Jobs: jobs})
+}
+
 // scanLibrary enqueues a scan job for the library and returns the queued job;
 // the worker runs it and reports progress over the job event stream.
 func (s *Server) scanLibrary(w http.ResponseWriter, r *http.Request) {

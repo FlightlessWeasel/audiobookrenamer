@@ -12,6 +12,7 @@ import {
 import { useGroupBy } from "../lib/useGroupBy";
 import { formatScore, scoreClass } from "../lib/matchScore";
 import { BookPlanCard, planHasRealMoves, planHasWork } from "../components/BookPlanCard";
+import { TriStateCheckbox } from "../components/TriStateCheckbox";
 
 export function OrganizePage() {
   const libs = useAsync((signal) => client.listLibraries({ signal }), []);
@@ -333,36 +334,5 @@ function SelectRow({
         </div>
       </td>
     </tr>
-  );
-}
-
-// A checkbox that also renders the "some but not all" indeterminate state,
-// which React can only set imperatively on the DOM node.
-function TriStateCheckbox({
-  checked,
-  indeterminate,
-  onChange,
-  label,
-  disabled,
-}: {
-  checked: boolean;
-  indeterminate: boolean;
-  onChange: () => void;
-  label: string;
-  disabled?: boolean;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (ref.current) ref.current.indeterminate = !checked && indeterminate;
-  }, [checked, indeterminate]);
-  return (
-    <input
-      ref={ref}
-      type="checkbox"
-      aria-label={label}
-      checked={checked}
-      disabled={disabled}
-      onChange={onChange}
-    />
   );
 }

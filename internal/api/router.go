@@ -39,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 			pr.Route("/libraries", func(lr chi.Router) {
 				lr.Get("/", s.listLibraries)
 				lr.Post("/", s.createLibrary)
+				lr.Post("/rescan-all", s.rescanAllLibraries)
 				lr.Route("/{id}", func(one chi.Router) {
 					one.Get("/", s.getLibrary)
 					one.Patch("/", s.updateLibrary)
@@ -60,9 +61,11 @@ func (s *Server) Handler() http.Handler {
 			pr.Route("/books", func(br chi.Router) {
 				br.Get("/", s.listBooks)
 				br.Post("/accept-top", s.acceptTopCandidates)
+				br.Post("/delete", s.deleteBooks)
 				br.Route("/{id}", func(one chi.Router) {
 					one.Get("/", s.getBook)
 					one.Patch("/", s.patchBook)
+					one.Delete("/", s.deleteBook)
 					one.Get("/candidates", s.listCandidates)
 					one.Post("/match", s.matchBook)
 				})

@@ -45,6 +45,26 @@ describe("LibraryPage edit form", () => {
     expect(patchBody).toMatchObject({ file_template: "{author} - {title}{ext}" });
   });
 
+  it("rescan-all POSTs /libraries/rescan-all and reports the queued count", async () => {
+    let called = false;
+    mockFetch((path, init) => {
+      if (path === "/libraries" && (!init || init.method === undefined)) return { body: [lib] };
+      if (path === "/libraries/rescan-all" && init?.method === "POST") {
+        called = true;
+        return { status: 202, body: { jobs: [{ id: "j1", type: "scan", status: "queued", total: 0, done: 0, created_at: "" }] } };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(<LibraryPage />);
+
+    await user.click(await screen.findByRole("button", { name: /rescan all/i }));
+
+    await waitFor(() => expect(called).toBe(true));
+    await screen.findByText(/queued 1 scan/i);
+  });
+
   it("sends file_template:\"\" when the template field is cleared (reset to default)", async () => {
     let patchBody: Record<string, unknown> = {};
     mockFetch((path, init) => {

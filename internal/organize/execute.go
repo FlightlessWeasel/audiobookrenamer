@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 
 	"audiobookrenamer/internal/db"
 	"audiobookrenamer/internal/model"
+	"audiobookrenamer/internal/pathguard"
 )
 
 // bookSnapshot is stored (as a journal row) before a book is moved so undo can
@@ -576,49 +576,13 @@ func moveAcrossDevices(src, dst string) error {
 // window between the up-front batch check and the actual rename. Error wording
 // matches the batch check so behaviour is identical either way.
 func checkMoveContainment(root, src, dst string) error {
-	if !resolvedWithinRoot(root, src) || !resolvedWithinRoot(root, dst) {
+	if !pathguard.ResolvedWithinRoot(root, src) || !pathguard.ResolvedWithinRoot(root, dst) {
 		return fmt.Errorf("refusing move outside library root: %s -> %s", src, dst)
 	}
 	if fi, err := os.Lstat(src); err == nil && fi.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("refusing to move symlink: %s", src)
 	}
 	return nil
-}
-
-// withinRoot reports whether p is root itself or a path nested under it (no
-// ".." escape). Both paths are cleaned; it does not resolve symlinks.
-func withinRoot(root, p string) bool {
-	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(p))
-	if err != nil {
-		return false
-	}
-	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
-}
-
-// resolvedWithinRoot is withinRoot after resolving symlinks: the library root
-// and the deepest existing ancestor of p are both passed through
-// filepath.EvalSymlinks, so a symlinked parent directory cannot be used to
-// escape the root. p itself need not exist yet.
-func resolvedWithinRoot(root, p string) bool {
-	realRoot, err := filepath.EvalSymlinks(filepath.Clean(root))
-	if err != nil {
-		return false
-	}
-	probe := filepath.Clean(p)
-	for {
-		if resolved, err := filepath.EvalSymlinks(probe); err == nil {
-			rest, err := filepath.Rel(probe, filepath.Clean(p))
-			if err != nil {
-				return false
-			}
-			return withinRoot(realRoot, filepath.Join(resolved, rest))
-		}
-		parent := filepath.Dir(probe)
-		if parent == probe {
-			return false
-		}
-		probe = parent
-	}
 }
 
 // moveStep is one planned filesystem move (or case-fix) Execute is about to

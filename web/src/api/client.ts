@@ -69,6 +69,14 @@ export interface BooksResponse {
   counts: Record<string, number>;
 }
 
+// Outcome of a bulk book delete. `deleted` is how many were removed from disk
+// and the database; `failed` lists the rest with the reason (e.g. a path that
+// resolved outside the library root), so a partial run can be explained.
+export interface DeleteBooksResult {
+  deleted: number;
+  failed?: { id: string; title?: string; error: string }[];
+}
+
 export interface Candidate {
   provider: string;
   provider_id: string;
@@ -582,6 +590,13 @@ export const client = {
     api<void>(`/libraries/${id}`, { method: "DELETE" }),
   scanLibrary: (id: string) =>
     api<Job>(`/libraries/${id}/scan`, { method: "POST" }, vJob),
+  // Enqueue a scan for every enabled library in one call.
+  rescanAllLibraries: () =>
+    api<{ jobs: Job[] }>(
+      `/libraries/rescan-all`,
+      { method: "POST" },
+      (raw) => ({ jobs: vJobs((raw as { jobs: unknown }).jobs) }),
+    ),
 
   listBooks: (
     params: { library_id?: string; state?: string; q?: string } = {},
@@ -598,6 +613,15 @@ export const client = {
   },
   getBook: (id: string, opts?: ReadOpts) =>
     api<Book>(`/books/${id}`, { signal: opts?.signal }, vBook),
+  // Delete one book: its audio files are removed from disk and its row from the
+  // database. Not undoable.
+  deleteBook: (id: string) => api<void>(`/books/${id}`, { method: "DELETE" }),
+  // Delete several books at once; see DeleteBooksResult for the partial-run shape.
+  deleteBooks: (ids: string[]) =>
+    api<DeleteBooksResult>(`/books/delete`, {
+      method: "POST",
+      body: JSON.stringify({ ids }),
+    }),
   updateBook: (id: string, patch: { author_sort?: string }) =>
     api<Book>(
       `/books/${id}`,

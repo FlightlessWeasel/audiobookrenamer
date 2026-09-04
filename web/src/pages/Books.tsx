@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { client, type AcceptOutcome, type Book } from "../api/client";
 import { useAction } from "../lib/useAction";
@@ -13,6 +13,7 @@ import {
 } from "../lib/groupBooks";
 import { useGroupBy } from "../lib/useGroupBy";
 import { formatScore, scoreClass } from "../lib/matchScore";
+import { TriStateCheckbox } from "../components/TriStateCheckbox";
 
 const STATES = ["unmatched", "needs_review", "matched", "organized", "error"] as const;
 
@@ -37,11 +38,74 @@ export function BooksPage() {
   }, [libs.data]);
 
   const counts = books.data?.counts ?? {};
+  const allBooks = useMemo(() => books.data?.books ?? [], [books.data?.books]);
 
   const groups = useMemo(
-    () => groupBooks(books.data?.books ?? [], groupBy, libName),
-    [books.data?.books, groupBy, libName],
+    () => groupBooks(allBooks, groupBy, libName),
+    [allBooks, groupBy, libName],
   );
+
+  // Multi-select for bulk delete. The set is pruned to the currently-listed
+  // books whenever the list changes (a filter, a search, a reload), so a stale
+  // id can never be sent to the delete endpoint.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(allBooks.map((b) => b.id));
+      const next = new Set<string>();
+      for (const id of prev) if (live.has(id)) next.add(id);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [allBooks]);
+
+  const { run: runDelete, busy: deleting, error: deleteErr, mounted } = useAction();
+  const [deleteMsg, setDeleteMsg] = useState<string | null>(null);
+
+  function toggle(id: string) {
+    setSelected((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  }
+  function setMany(ids: string[], on: boolean) {
+    setSelected((s) => {
+      const n = new Set(s);
+      for (const id of ids) on ? n.add(id) : n.delete(id);
+      return n;
+    });
+  }
+
+  const allIds = allBooks.map((b) => b.id);
+  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
+  const someSelected = allIds.some((id) => selected.has(id));
+
+  function deleteSelected() {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    if (
+      !confirm(
+        `Permanently delete ${ids.length} book${ids.length === 1 ? "" : "s"}?\n\n` +
+          `The audio files are removed from disk and the records from the database. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setDeleteMsg(null);
+    runDelete(async () => {
+      const res = await client.deleteBooks(ids);
+      if (!mounted.current) return;
+      setSelected(new Set());
+      books.reload();
+      const failed = res.failed?.length ?? 0;
+      setDeleteMsg(
+        failed === 0
+          ? `Deleted ${res.deleted} book${res.deleted === 1 ? "" : "s"}.`
+          : `Deleted ${res.deleted}; ${failed} could not be removed (${res.failed?.[0]?.error ?? "unknown error"}).`,
+      );
+    });
+  }
 
   return (
     <div className="space-y-4">
@@ -58,6 +122,28 @@ export function BooksPage() {
           pending={(counts.unmatched ?? 0) + (counts.needs_review ?? 0)}
           onDone={() => books.reload()}
         />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800">
+        <label className="flex items-center gap-2 text-sm text-slate-500">
+          <TriStateCheckbox
+            checked={allSelected}
+            indeterminate={someSelected && !allSelected}
+            disabled={allBooks.length === 0}
+            onChange={() => setMany(allIds, !allSelected)}
+            label="Select all listed books"
+          />
+          <span>{selected.size} selected</span>
+        </label>
+        <button
+          onClick={deleteSelected}
+          disabled={selected.size === 0 || deleting}
+          className="rounded border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 disabled:opacity-40 dark:border-red-800 dark:text-red-400"
+        >
+          {deleting ? "Deleting…" : "Delete selected"}
+        </button>
+        {deleteMsg && <span className="text-xs text-slate-500">{deleteMsg}</span>}
+        {deleteErr && <span className="text-xs text-red-600">{deleteErr}</span>}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -116,6 +202,7 @@ export function BooksPage() {
         <table className="w-full min-w-[48rem] text-sm">
           <thead className="bg-slate-100 text-left text-xs uppercase text-slate-500 dark:bg-slate-800">
             <tr>
+              <th className="w-10 px-3 py-2"></th>
               <th className="px-3 py-2">Title</th>
               <th className="px-3 py-2">Author</th>
               <th className="px-3 py-2">Library</th>
@@ -126,29 +213,54 @@ export function BooksPage() {
           </thead>
           <tbody>
             {groups
-              ? groups.map((g) => (
-                  <Fragment key={g.label}>
-                    <tr className="border-t border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/50">
-                      <th
-                        colSpan={6}
-                        scope="colgroup"
-                        className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
-                      >
-                        {g.label}
-                        <span className="ml-2 font-normal text-slate-400">{g.books.length}</span>
-                      </th>
-                    </tr>
-                    {g.books.map((b) => (
-                      <BookRow key={b.id} book={b} libName={libName} />
-                    ))}
-                  </Fragment>
-                ))
-              : books.data?.books.map((b: Book) => (
-                  <BookRow key={b.id} book={b} libName={libName} />
+              ? groups.map((g) => {
+                  const gIds = g.books.map((b) => b.id);
+                  const gAll = gIds.every((id) => selected.has(id));
+                  const gSome = gIds.some((id) => selected.has(id));
+                  return (
+                    <Fragment key={g.label}>
+                      <tr className="border-t border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/50">
+                        <th
+                          colSpan={7}
+                          scope="colgroup"
+                          className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
+                        >
+                          <label className="flex items-center gap-2 normal-case">
+                            <TriStateCheckbox
+                              checked={gAll}
+                              indeterminate={gSome && !gAll}
+                              onChange={() => setMany(gIds, !gAll)}
+                              label={`Select all in ${g.label}`}
+                            />
+                            <span>{g.label}</span>
+                            <span className="font-normal text-slate-400">{g.books.length}</span>
+                          </label>
+                        </th>
+                      </tr>
+                      {g.books.map((b) => (
+                        <BookRow
+                          key={b.id}
+                          book={b}
+                          libName={libName}
+                          checked={selected.has(b.id)}
+                          onToggle={() => toggle(b.id)}
+                        />
+                      ))}
+                    </Fragment>
+                  );
+                })
+              : allBooks.map((b: Book) => (
+                  <BookRow
+                    key={b.id}
+                    book={b}
+                    libName={libName}
+                    checked={selected.has(b.id)}
+                    onToggle={() => toggle(b.id)}
+                  />
                 ))}
-            {books.data?.books.length === 0 && (
+            {allBooks.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
                   No books. Add a library and run a scan.
                 </td>
               </tr>
@@ -260,9 +372,27 @@ function basename(b: Book) {
   return p.split(/[\\/]/).pop() ?? p;
 }
 
-function BookRow({ book: b, libName }: { book: Book; libName: (id: string) => string }) {
+function BookRow({
+  book: b,
+  libName,
+  checked,
+  onToggle,
+}: {
+  book: Book;
+  libName: (id: string) => string;
+  checked: boolean;
+  onToggle: () => void;
+}) {
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50">
+      <td className="w-10 px-3 py-2">
+        <input
+          type="checkbox"
+          aria-label={`Select ${b.title || b.id}`}
+          checked={checked}
+          onChange={onToggle}
+        />
+      </td>
       <td className="px-3 py-2">
         <Link to={`/books/${b.id}`} className="font-medium hover:underline">
           {b.title || <span className="text-slate-400">{basename(b)}</span>}
