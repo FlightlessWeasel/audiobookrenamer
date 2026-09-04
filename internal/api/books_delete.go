@@ -66,14 +66,7 @@ func (s *Server) deleteBooks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	seen := make(map[string]bool, len(req.IDs))
-	ids := req.IDs[:0:0]
-	for _, id := range req.IDs {
-		if id != "" && !seen[id] {
-			seen[id] = true
-			ids = append(ids, id)
-		}
-	}
+	ids := dedupeIDs(req.IDs)
 	if len(ids) == 0 {
 		writeErr(w, http.StatusBadRequest, "ids is required")
 		return
@@ -157,4 +150,19 @@ func (s *Server) removeBookFromDisk(b model.Book) error {
 	}
 	pathguard.PruneEmptyParents(root, filepath.Dir(b.SourceDir))
 	return nil
+}
+
+// dedupeIDs drops blanks and repeats from a batch request's id list, keeping
+// first-seen order, so a caller's accidental duplicate can't be double-counted
+// (a double delete) or double-charged against a request's id cap (tag-status).
+func dedupeIDs(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	out := ids[:0:0]
+	for _, id := range ids {
+		if id != "" && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }

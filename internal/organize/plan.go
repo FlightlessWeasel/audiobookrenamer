@@ -402,16 +402,20 @@ func planBook(database *db.DB, lib model.Library, b model.Book) BookPlan {
 	// active set and leave it stuck at "matched" forever even though its files
 	// are already exactly where they belong.
 	if lib.WriteTags {
-		bp.TagFiles = planTagFiles(database, lib, b)
+		bp.TagFiles = CheckBookTags(database, lib, b)
 	}
 	return bp
 }
 
-// planTagFiles computes, for every file of b, whether organize would rewrite
-// its embedded tags. It only reads: the file's current tags (if the container
-// has a writer at all) and, when the library also embeds covers, the book's
-// cached cover. Called only when lib.WriteTags is set.
-func planTagFiles(database *db.DB, lib model.Library, b model.Book) []TagFilePlan {
+// CheckBookTags computes, for every file of b, whether organize would rewrite
+// its embedded tags: whether the container has a writer at all, and if so
+// whether its current tags already match what would be written. It only
+// reads — the file's current tags and, when the library also embeds covers,
+// the book's cached cover — so it is safe to call outside a plan/apply run,
+// e.g. to answer "do this book's files already carry its accepted metadata".
+//
+// b.Files must already be populated (db.GetBook, not GetBookBare).
+func CheckBookTags(database *db.DB, lib model.Library, b model.Book) []TagFilePlan {
 	var cover []byte
 	var coverMIME string
 	if lib.EmbedCover {

@@ -140,6 +140,19 @@ export interface BookPlan {
   tag_files?: TagFilePlan[];
 }
 
+// TagStatus is one book's tag-drift check: whether its files' currently
+// embedded tags match its accepted metadata. match is computed even when the
+// library has write_tags off (enabled: false), so the UI can preview what
+// turning it on would do without that reading as something being broken.
+export interface TagStatus {
+  id: string;
+  title?: string;
+  enabled: boolean;
+  match: "match" | "mismatch" | "unsupported" | "unmatched";
+  files?: TagFilePlan[];
+  error?: string;
+}
+
 export interface OrganizePlan {
   library_id: string;
   root_path: string;
@@ -485,6 +498,22 @@ function vTagFilePlan(raw: unknown): TagFilePlan {
     reason: optStr(o.reason),
   };
 }
+function vTagStatus(raw: unknown): TagStatus {
+  const o = obj(raw, "tag status");
+  return {
+    id: str(o.id, "tag_status.id"),
+    title: optStr(o.title),
+    enabled: looseBool(o.enabled),
+    match: pick(o.match, ["match", "mismatch", "unsupported", "unmatched"] as const, "unmatched"),
+    files: Array.isArray(o.files) ? o.files.map(vTagFilePlan) : undefined,
+    error: optStr(o.error),
+  };
+}
+// The endpoint wraps the array as { books: [...] }; callers just want the array.
+function vTagStatusResponse(raw: unknown): TagStatus[] {
+  const o = obj(raw, "tag status response");
+  return arr(o.books, "tag_status_response.books").map(vTagStatus);
+}
 function vBookPlan(raw: unknown): BookPlan {
   const o = obj(raw, "book plan");
   return {
@@ -651,6 +680,15 @@ export const client = {
       method: "POST",
       body: JSON.stringify({ ids }),
     }),
+  // Checks whether each book's files currently carry its accepted metadata.
+  // Reads files on disk, so callers should scope ids to what's actually
+  // visible rather than an entire library (at most 200 per call).
+  tagStatus: (ids: string[]) =>
+    api<TagStatus[]>(
+      `/books/tag-status`,
+      { method: "POST", body: JSON.stringify({ ids }) },
+      vTagStatusResponse,
+    ),
   updateBook: (id: string, patch: { author_sort?: string }) =>
     api<Book>(
       `/books/${id}`,

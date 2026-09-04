@@ -62,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 				br.Get("/", s.listBooks)
 				br.Post("/accept-top", s.acceptTopCandidates)
 				br.Post("/delete", s.deleteBooks)
+				br.Post("/tag-status", s.tagStatusBooks)
 				br.Route("/{id}", func(one chi.Router) {
 					one.Get("/", s.getBook)
 					one.Patch("/", s.patchBook)

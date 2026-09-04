@@ -328,3 +328,45 @@ describe("BookDetail delete", () => {
     ).toBe(false);
   });
 });
+
+describe("BookDetail tag status", () => {
+  it("checks this book's tags on demand and shows the per-file detail", async () => {
+    let tagStatusBody: unknown = null;
+    mockFetch((path, init) => {
+      if (path === "/books/b1" && (!init || init.method === undefined)) return { body: book };
+      if (path === "/books/b1/candidates") return { body: [] };
+      if (path === "/settings") return { body: settings };
+      if (path === "/books/tag-status" && init?.method === "POST") {
+        tagStatusBody = JSON.parse(String(init.body));
+        return {
+          body: {
+            books: [
+              {
+                id: "b1",
+                enabled: true,
+                match: "mismatch",
+                files: [{ file_rel: "Dune.m4b", writable: true, changed: true }],
+              },
+            ],
+          },
+        };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    renderBookDetail();
+
+    // Not fetched automatically on page load.
+    await screen.findByText(/embedded tags/i);
+    expect(screen.queryByText("tags differ")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^check tags$/i }));
+
+    await screen.findByText("tags differ");
+    // The per-file breakdown ("Dune.m4b — out of date") is its own list item,
+    // distinct from the summary sentence above it that also names the file.
+    expect(screen.getByRole("listitem")).toHaveTextContent("Dune.m4b");
+    expect(tagStatusBody).toEqual({ ids: ["b1"] });
+  });
+});

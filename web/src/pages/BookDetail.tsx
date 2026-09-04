@@ -7,10 +7,12 @@ import {
   type Candidate,
   type ManualMatch,
   type OrganizePlan,
+  type TagStatus,
 } from "../api/client";
 import { useAction } from "../lib/useAction";
 import { useAsync } from "../lib/useAsync";
 import { statusLabel } from "../lib/status";
+import { tagMatchBadgeClass, tagMatchLabel, tagStatusDetail } from "../lib/tagStatus";
 import { BookPlanCard, planHasRealMoves, planHasWork } from "../components/BookPlanCard";
 import { waitForJob } from "../lib/waitForJob";
 
@@ -194,6 +196,8 @@ export function BookDetailPage() {
           }
         />
       </dl>
+
+      <TagStatusPanel key={`tags-${b.id}`} book={b} />
 
       <AuthorSortEditor
         key={b.id}
@@ -391,6 +395,69 @@ function OrganizePanel({
         </p>
       )}
       {bp && <BookPlanCard plan={bp} />}
+    </section>
+  );
+}
+
+// TagStatusPanel checks whether this book's file(s) currently carry embedded
+// tags matching its accepted metadata. Fetched on demand — a button, not
+// automatic on page load — because it reads the file(s) on disk, which for a
+// large FLAC file in particular can take a moment.
+function TagStatusPanel({ book }: { book: Book }) {
+  const [status, setStatus] = useState<TagStatus | null>(null);
+  const { run, busy, error, mounted } = useAction();
+
+  function check() {
+    run(async () => {
+      const [result] = await client.tagStatus([book.id]);
+      if (mounted.current) setStatus(result ?? null);
+    });
+  }
+
+  return (
+    <section className="max-w-xl space-y-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-sm font-medium">Embedded tags</h2>
+        <button
+          onClick={check}
+          disabled={busy}
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-slate-700"
+        >
+          {busy ? "Checking…" : status ? "Recheck" : "Check tags"}
+        </button>
+        {status && (
+          <span
+            className={`rounded px-2 py-0.5 text-xs font-medium ${tagMatchBadgeClass(status.match)}`}
+          >
+            {tagMatchLabel(status.match)}
+          </span>
+        )}
+      </div>
+      {error && (
+        <p role="alert" className="rounded bg-red-100 px-3 py-2 text-sm text-red-800">
+          {error}
+        </p>
+      )}
+      {status && (
+        <>
+          <p className="text-sm text-slate-500">{tagStatusDetail(status)}</p>
+          {status.files && status.files.length > 0 && (
+            <ul className="space-y-1 font-mono text-xs">
+              {status.files.map((f) => (
+                <li
+                  key={f.file_rel}
+                  className={f.writable && f.changed ? "text-amber-600 dark:text-amber-400" : "text-slate-500"}
+                >
+                  {f.file_rel}
+                  {!f.writable && <span className="ml-2 text-slate-400">({f.reason})</span>}
+                  {f.writable && f.changed && <span className="ml-2">— out of date</span>}
+                  {f.writable && !f.changed && <span className="ml-2 text-slate-400">— up to date</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
     </section>
   );
 }

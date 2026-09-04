@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { client, type AcceptOutcome, type Book } from "../api/client";
+import { client, type AcceptOutcome, type Book, type TagStatus } from "../api/client";
 import { useAction } from "../lib/useAction";
 import { useAsync } from "../lib/useAsync";
 import { useDebounced } from "../lib/useDebounced";
 import { statusBadgeClass, statusLabel } from "../lib/status";
+import { tagMatchBadgeClass, tagMatchLabel, tagStatusDetail } from "../lib/tagStatus";
 import {
   GROUP_OPTIONS,
   groupBooks,
@@ -16,6 +17,12 @@ import { formatScore, scoreClass } from "../lib/matchScore";
 import { TriStateCheckbox } from "../components/TriStateCheckbox";
 
 const STATES = ["unmatched", "needs_review", "matched", "organized", "error"] as const;
+
+// Checking tags means reading every listed file on disk, so it is an explicit
+// action rather than something that fires on every list load, and it is
+// capped to a batch the server will actually accept in one call (see
+// maxTagStatusIDs in internal/api/books_tags.go).
+const MAX_TAG_CHECK = 200;
 
 export function BooksPage() {
   const libs = useAsync((signal) => client.listLibraries({ signal }), []);
@@ -61,6 +68,27 @@ export function BooksPage() {
 
   const { run: runDelete, busy: deleting, error: deleteErr, mounted } = useAction();
   const [deleteMsg, setDeleteMsg] = useState<string | null>(null);
+
+  // Tag status is checked on demand, not fetched with the list: it reads every
+  // listed file on disk, which the list itself never does. Keyed by book id so
+  // a reload or a filter change doesn't have to throw known results away.
+  const [tagStatuses, setTagStatuses] = useState<Map<string, TagStatus>>(new Map());
+  const { run: runTagCheck, busy: checkingTags, error: tagCheckErr } = useAction();
+
+  function checkTags() {
+    const ids = allBooks.map((b) => b.id);
+    if (ids.length === 0 || ids.length > MAX_TAG_CHECK) return;
+    runTagCheck(async () => {
+      const results = await client.tagStatus(ids);
+      if (mounted.current) {
+        setTagStatuses((prev) => {
+          const next = new Map(prev);
+          for (const r of results) next.set(r.id, r);
+          return next;
+        });
+      }
+    });
+  }
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -122,6 +150,19 @@ export function BooksPage() {
           pending={(counts.unmatched ?? 0) + (counts.needs_review ?? 0)}
           onDone={() => books.reload()}
         />
+        <button
+          onClick={checkTags}
+          disabled={checkingTags || allBooks.length === 0 || allBooks.length > MAX_TAG_CHECK}
+          title={
+            allBooks.length > MAX_TAG_CHECK
+              ? `Narrow the filter to ${MAX_TAG_CHECK} or fewer books to check tags`
+              : "Reads each listed file's embedded tags and compares them to this book's accepted metadata"
+          }
+          className="rounded border border-slate-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-slate-700"
+        >
+          {checkingTags ? "Checking tags…" : "Check tags"}
+        </button>
+        {tagCheckErr && <span className="text-xs text-red-600">{tagCheckErr}</span>}
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-800">
@@ -209,6 +250,7 @@ export function BooksPage() {
               <th className="px-3 py-2">Layout</th>
               <th className="px-3 py-2">Match</th>
               <th className="px-3 py-2">State</th>
+              <th className="px-3 py-2">Tags</th>
             </tr>
           </thead>
           <tbody>
@@ -221,7 +263,7 @@ export function BooksPage() {
                     <Fragment key={g.label}>
                       <tr className="border-t border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/50">
                         <th
-                          colSpan={7}
+                          colSpan={8}
                           scope="colgroup"
                           className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-slate-500"
                         >
@@ -244,6 +286,7 @@ export function BooksPage() {
                           libName={libName}
                           checked={selected.has(b.id)}
                           onToggle={() => toggle(b.id)}
+                          tagStatus={tagStatuses.get(b.id)}
                         />
                       ))}
                     </Fragment>
@@ -256,11 +299,12 @@ export function BooksPage() {
                     libName={libName}
                     checked={selected.has(b.id)}
                     onToggle={() => toggle(b.id)}
+                    tagStatus={tagStatuses.get(b.id)}
                   />
                 ))}
             {allBooks.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-slate-500">
+                <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
                   No books. Add a library and run a scan.
                 </td>
               </tr>
@@ -377,11 +421,13 @@ function BookRow({
   libName,
   checked,
   onToggle,
+  tagStatus,
 }: {
   book: Book;
   libName: (id: string) => string;
   checked: boolean;
   onToggle: () => void;
+  tagStatus?: TagStatus;
 }) {
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50">
@@ -425,6 +471,18 @@ function BookRow({
         <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusBadgeClass(b.state)}`}>
           {statusLabel(b.state)}
         </span>
+      </td>
+      <td className="px-3 py-2">
+        {tagStatus ? (
+          <span
+            className={`rounded px-2 py-0.5 text-xs font-medium ${tagMatchBadgeClass(tagStatus.match)}`}
+            title={tagStatusDetail(tagStatus)}
+          >
+            {tagMatchLabel(tagStatus.match)}
+          </span>
+        ) : (
+          <span className="text-xs text-slate-400">—</span>
+        )}
       </td>
     </tr>
   );

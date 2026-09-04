@@ -49,7 +49,7 @@ describe("BooksPage grouping", () => {
     );
 
     const headers = await screen.findAllByRole("columnheader");
-    const groupHeaders = headers.filter((h) => h.getAttribute("colspan") === "7");
+    const groupHeaders = headers.filter((h) => h.getAttribute("colspan") === "8");
     expect(groupHeaders.map((h) => h.textContent)).toEqual([
       "Amy Author2",
       "Unknown author1",
@@ -71,7 +71,7 @@ describe("BooksPage grouping", () => {
     await screen.findByRole("link", { name: "Alpha" });
     expect(screen.getByRole("combobox", { name: /group books by/i })).toHaveValue("author");
     expect(
-      screen.getAllByRole("columnheader").filter((h) => h.getAttribute("colspan") === "7").length,
+      screen.getAllByRole("columnheader").filter((h) => h.getAttribute("colspan") === "8").length,
     ).toBeGreaterThan(0);
   });
 
@@ -86,7 +86,7 @@ describe("BooksPage grouping", () => {
 
     await waitFor(() =>
       expect(
-        screen.getAllByRole("columnheader").filter((h) => h.getAttribute("colspan") === "7").map((h) => h.textContent),
+        screen.getAllByRole("columnheader").filter((h) => h.getAttribute("colspan") === "8").map((h) => h.textContent),
       ).toEqual(["Lib One2", "Lib Two2"]),
     );
   });
@@ -140,5 +140,59 @@ describe("BooksPage bulk delete", () => {
     await user.click(screen.getByRole("button", { name: /delete selected/i }));
 
     expect(fetchFn.mock.calls.some(([u]) => String(u).endsWith("/books/delete"))).toBe(false);
+  });
+});
+
+describe("BooksPage tag status", () => {
+  it("posts every listed id to /books/tag-status and renders a badge per row", async () => {
+    let tagStatusBody: unknown = null;
+    mockFetch((path, init) => {
+      if (path === "/libraries") return { body: libs };
+      if (path === "/books/tag-status" && init?.method === "POST") {
+        tagStatusBody = JSON.parse(String(init.body));
+        return {
+          body: {
+            books: [
+              { id: "b1", enabled: true, match: "mismatch", files: [{ file_rel: "a.m4b", writable: true, changed: true }] },
+              { id: "b3", enabled: true, match: "match" },
+            ],
+          },
+        };
+      }
+      if (path.startsWith("/books")) return { body: { books, counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("link", { name: "Alpha" });
+    // No indicator until the check has actually run.
+    expect(screen.queryByText("tags differ")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /check tags/i }));
+
+    await screen.findByText("tags differ");
+    expect(screen.getByText("tags match")).toBeInTheDocument();
+    expect(tagStatusBody).toEqual({ ids: ["b1", "b2", "b3", "b4"] });
+  });
+
+  it("disables Check tags when there is nothing listed", async () => {
+    mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) return { body: { books: [], counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /check tags/i })).toBeDisabled(),
+    );
   });
 });
