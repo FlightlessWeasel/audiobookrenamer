@@ -403,3 +403,28 @@ describe("OrganizePage tag-writing preview", () => {
     expect(screen.queryByText(/rewrite embedded tags/i)).not.toBeInTheDocument();
   });
 });
+
+describe("OrganizePage include organized books", () => {
+  it("only lists matched books until the checkbox is ticked, then adds organized ones too", async () => {
+    let organizedRequested = false;
+    mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.includes("state=organized")) {
+        organizedRequested = true;
+        return { body: { books: [book("o1", "A")], counts: {} } };
+      }
+      if (path.startsWith("/books")) return { body: { books: [book("a1", "A")], counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    render(<OrganizePage />, { wrapper: MemoryRouter });
+    await waitFor(() => expect(screen.getByText("1 of 1 matched books")).toBeInTheDocument());
+    expect(organizedRequested).toBe(false);
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("checkbox", { name: /include already-organized books/i }));
+
+    await waitFor(() => expect(screen.getByText("2 of 2 books")).toBeInTheDocument());
+    expect(organizedRequested).toBe(true);
+  });
+});

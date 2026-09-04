@@ -197,8 +197,6 @@ export function BookDetailPage() {
         />
       </dl>
 
-      <TagStatusPanel key={`tags-${b.id}`} book={b} />
-
       <AuthorSortEditor
         key={b.id}
         current={b.author_sort ?? ""}
@@ -251,22 +249,7 @@ export function BookDetailPage() {
         </div>
       </section>
 
-      <div>
-        <h2 className="mb-2 text-sm font-medium">
-          Files ({b.files?.length ?? 0})
-        </h2>
-        <ul className="divide-y divide-slate-100 rounded border border-slate-200 text-xs dark:divide-slate-800 dark:border-slate-800">
-          {b.files?.map((f) => (
-            <li key={f.id} className="flex justify-between px-3 py-1.5">
-              <span className="font-mono">{f.rel_path}</span>
-              <span className="text-slate-400">
-                {f.track ? `#${f.track} · ` : ""}
-                {(f.size / 1_000_000).toFixed(1)} MB
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
+      <FilesSection key={`files-${b.id}`} book={b} onRetagged={reloadAll} />
     </div>
   );
 }
@@ -399,35 +382,76 @@ function OrganizePanel({
   );
 }
 
-// TagStatusPanel checks whether this book's file(s) currently carry embedded
-// tags matching its accepted metadata. Fetched on demand — a button, not
-// automatic on page load — because it reads the file(s) on disk, which for a
-// large FLAC file in particular can take a moment.
-function TagStatusPanel({ book }: { book: Book }) {
+// FilesSection lists this book's audio files as a table, with a per-file tag
+// status column, a check action, and a retag action.
+//
+// Both are on demand, never automatic on page load: a check reads the
+// file(s) on disk (a large FLAC file in particular can take a moment), and a
+// retag runs a real organize/apply for this one book — the same job the
+// Organize panel above queues, so it can also move the file if its target
+// path has since changed, not only rewrite tags. It is disabled unless the
+// book is matched or organized, matching that panel's own gate, and it
+// re-checks tags automatically once the job finishes so the table reflects
+// what actually landed.
+function FilesSection({ book, onRetagged }: { book: Book; onRetagged?: () => void }) {
   const [status, setStatus] = useState<TagStatus | null>(null);
-  const { run, busy, error, mounted } = useAction();
+  const { run, isBusy, error, mounted } = useAction();
+  const canRetag = book.state === "matched" || book.state === "organized";
 
   function check() {
     run(async () => {
       const [result] = await client.tagStatus([book.id]);
       if (mounted.current) setStatus(result ?? null);
-    });
+    }, "check");
   }
 
+  function retag() {
+    run(async () => {
+      const job = await client.organizeApply(book.library_id, [book.id]);
+      const final = await waitForJob(job.id);
+      if (!mounted.current) return;
+      if (final.status !== "done") {
+        throw new Error(
+          final.status === "canceled" ? "Organize job was canceled." : final.error || "Organize job failed.",
+        );
+      }
+      const [result] = await client.tagStatus([book.id]);
+      if (mounted.current) setStatus(result ?? null);
+      onRetagged?.();
+    }, "retag");
+  }
+
+  const tagsByFile = new Map((status?.files ?? []).map((f) => [f.file_rel, f]));
+  const files = book.files ?? [];
+
   return (
-    <section className="max-w-xl space-y-3 rounded-lg border border-slate-200 p-4 dark:border-slate-800">
+    <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
-        <h2 className="text-sm font-medium">Embedded tags</h2>
+        <h2 className="text-sm font-medium">Files ({files.length})</h2>
         <button
           onClick={check}
-          disabled={busy}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-slate-700"
+          disabled={isBusy("check") || isBusy("retag")}
+          title="Reads each file's embedded tags and compares them to this book's accepted metadata"
+          className="rounded border border-slate-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-slate-700"
         >
-          {busy ? "Checking…" : status ? "Recheck" : "Check tags"}
+          {isBusy("check") ? "Checking…" : status ? "Recheck tags" : "Check tags"}
+        </button>
+        <button
+          onClick={retag}
+          disabled={!canRetag || isBusy("check") || isBusy("retag")}
+          title={
+            canRetag
+              ? "Runs organize for this book, rewriting its tags if the library has that on and they differ"
+              : "Match this book first — only matched or organized books can be retagged"
+          }
+          className="rounded border border-slate-300 px-2 py-1 text-xs disabled:opacity-40 dark:border-slate-700"
+        >
+          {isBusy("retag") ? "Retagging…" : "Retag now"}
         </button>
         {status && (
           <span
             className={`rounded px-2 py-0.5 text-xs font-medium ${tagMatchBadgeClass(status.match)}`}
+            title={tagStatusDetail(status)}
           >
             {tagMatchLabel(status.match)}
           </span>
@@ -438,27 +462,54 @@ function TagStatusPanel({ book }: { book: Book }) {
           {error}
         </p>
       )}
-      {status && (
-        <>
-          <p className="text-sm text-slate-500">{tagStatusDetail(status)}</p>
-          {status.files && status.files.length > 0 && (
-            <ul className="space-y-1 font-mono text-xs">
-              {status.files.map((f) => (
-                <li
-                  key={f.file_rel}
-                  className={f.writable && f.changed ? "text-amber-600 dark:text-amber-400" : "text-slate-500"}
-                >
-                  {f.file_rel}
-                  {!f.writable && <span className="ml-2 text-slate-400">({f.reason})</span>}
-                  {f.writable && f.changed && <span className="ml-2">— out of date</span>}
-                  {f.writable && !f.changed && <span className="ml-2 text-slate-400">— up to date</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-    </section>
+      <div className="overflow-x-auto rounded border border-slate-200 dark:border-slate-800">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-50 text-left uppercase text-slate-500 dark:bg-slate-800/50">
+            <tr>
+              <th className="px-3 py-1.5 font-medium">File</th>
+              <th className="px-3 py-1.5 font-medium">Track</th>
+              <th className="px-3 py-1.5 font-medium">Size</th>
+              <th className="px-3 py-1.5 font-medium">Tags</th>
+            </tr>
+          </thead>
+          <tbody>
+            {files.map((f) => {
+              const tf = tagsByFile.get(f.rel_path);
+              return (
+                <tr key={f.id} className="border-t border-slate-100 dark:border-slate-800">
+                  <td className="px-3 py-1.5 font-mono">{f.rel_path}</td>
+                  <td className="px-3 py-1.5 text-slate-400">{f.track || "—"}</td>
+                  <td className="px-3 py-1.5 text-slate-400">{(f.size / 1_000_000).toFixed(1)} MB</td>
+                  <td className="px-3 py-1.5">
+                    {tf ? (
+                      <span
+                        title={!tf.writable ? tf.reason : undefined}
+                        className={
+                          tf.writable && tf.changed
+                            ? "font-medium text-amber-600 dark:text-amber-400"
+                            : "text-slate-400"
+                        }
+                      >
+                        {!tf.writable ? "unsupported" : tf.changed ? "out of date" : "up to date"}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {files.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-3 py-4 text-center text-slate-400">
+                  No files.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

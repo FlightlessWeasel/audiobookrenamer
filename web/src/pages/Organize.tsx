@@ -22,17 +22,34 @@ export function OrganizePage() {
     if (!libraryId && libs.data?.length) setLibraryId(libs.data[0].id);
   }, [libs.data, libraryId]);
 
-  // The response is tagged with the library it was fetched for, so a response
-  // that lands after the user has already switched libraries can be recognised
-  // as stale and ignored.
+  // Already-organized books are excluded by default: they normally have
+  // nothing left to do here. Including them is how you re-apply a library —
+  // most often to retag books after turning write_tags on, or to re-verify a
+  // template change — since Apply still runs (and rewrites tags, if enabled)
+  // even when a book's files are already at their target path.
+  const [includeOrganized, setIncludeOrganized] = useState(false);
+  // Identifies which book set is currently in view: switching library or
+  // flipping this checkbox both change it. Tagging the fetch (below) and the
+  // selection (further down) with this, rather than libraryId alone, is what
+  // keeps a response or a selection from the wrong set from ever being
+  // treated as current — without it, a response still in flight for the old
+  // checkbox state would otherwise pass a same-library-so-it's-fresh check.
+  const scope = `${libraryId}:${includeOrganized}`;
+
+  // The response is tagged with the scope it was fetched for, so one that
+  // lands after the user has already switched libraries or flipped the
+  // checkbox can be recognised as stale and ignored.
   const matched = useAsync(
     (signal) =>
       libraryId
-        ? client
-            .listBooks({ library_id: libraryId, state: "matched" }, { signal })
-            .then((r) => ({ forLib: libraryId, books: r.books }))
+        ? Promise.all([
+            client.listBooks({ library_id: libraryId, state: "matched" }, { signal }),
+            includeOrganized
+              ? client.listBooks({ library_id: libraryId, state: "organized" }, { signal })
+              : Promise.resolve({ books: [], counts: {} }),
+          ]).then(([m, o]) => ({ forScope: scope, books: [...m.books, ...o.books] }))
         : Promise.resolve(null),
-    [libraryId],
+    [libraryId, includeOrganized],
   );
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -43,22 +60,26 @@ export function OrganizePage() {
   // block one while the other runs.
   const { run, busy: acting, isBusy, error: err, clearError, mounted } = useAction();
 
-  // Tracks which library the current selection belongs to, so a plain reload
-  // (e.g. after Apply) doesn't blow away the user's picks.
-  const selectionLib = useRef<string>("");
+  // Tracks which scope the current selection belongs to, so a plain reload
+  // (e.g. after Apply) doesn't blow away the user's picks, but switching
+  // scope selects the new set fresh instead of silently keeping only
+  // whichever ids happened to survive the switch.
+  const selectionScope = useRef<string>("");
 
-  // Switching library invalidates any selection/plan built against the old one
+  // Switching scope invalidates any selection/plan built against the old one
   // immediately, before the new book list arrives.
   useEffect(() => {
     setSelected(new Set());
     setPlan(null);
     setMsg(null);
     clearError();
-  }, [libraryId, clearError]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope, clearError]);
 
-  // Fresh data means: not loading, and the response is for the library that is
-  // currently selected (not a stale response from a previous selection).
-  const fresh = !matched.loading && matched.data?.forLib === libraryId ? matched.data : null;
+  // Fresh data means: not loading, and the response is for the scope that is
+  // currently in view (not a stale response from before a library switch or a
+  // checkbox flip).
+  const fresh = !matched.loading && matched.data?.forScope === scope ? matched.data : null;
   const loadingBooks = !fresh && !!libraryId;
   const books = fresh?.books ?? [];
 
@@ -66,18 +87,18 @@ export function OrganizePage() {
     if (!fresh) return; // wait for the real, current list before touching selection
     const ids = fresh.books.map((b) => b.id);
     setSelected((prev) => {
-      if (selectionLib.current !== libraryId) {
-        selectionLib.current = libraryId;
-        return new Set(ids); // first load for this library → select all
+      if (selectionScope.current !== scope) {
+        selectionScope.current = scope;
+        return new Set(ids); // first load for this scope → select all
       }
-      // Same library reloaded → keep the user's selection, minus any books
+      // Same scope reloaded → keep the user's selection, minus any books
       // that no longer exist.
       const next = new Set<string>();
       for (const id of ids) if (prev.has(id)) next.add(id);
       return next;
     });
     setPlan(null);
-  }, [fresh, libraryId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fresh, scope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const bookIds = useMemo(() => [...selected], [selected]);
 
@@ -167,6 +188,14 @@ export function OrganizePage() {
           ))}
         </select>
         <label className="flex items-center gap-2 text-sm text-slate-500">
+          <input
+            type="checkbox"
+            checked={includeOrganized}
+            onChange={(e) => setIncludeOrganized(e.target.checked)}
+          />
+          <span>Include already-organized books</span>
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-500">
           <TriStateCheckbox
             checked={allSelected}
             indeterminate={someSelected && !allSelected}
@@ -175,7 +204,9 @@ export function OrganizePage() {
             label="Select all books"
           />
           <span>
-            {loadingBooks ? "loading books…" : `${selected.size} of ${books.length} matched books`}
+            {loadingBooks
+              ? "loading books…"
+              : `${selected.size} of ${books.length} ${includeOrganized ? "" : "matched "}books`}
           </span>
         </label>
         <button
@@ -248,7 +279,9 @@ export function OrganizePage() {
               {books.length === 0 && (
                 <tr>
                   <td className="px-3 py-6 text-center text-slate-500">
-                    No matched books in this library. Match some first.
+                    {includeOrganized
+                      ? "No matched or organized books in this library."
+                      : "No matched books in this library. Match some first."}
                   </td>
                 </tr>
               )}

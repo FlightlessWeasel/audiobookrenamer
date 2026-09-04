@@ -329,11 +329,15 @@ describe("BookDetail delete", () => {
   });
 });
 
-describe("BookDetail tag status", () => {
-  it("checks this book's tags on demand and shows the per-file detail", async () => {
+describe("BookDetail files table", () => {
+  it("checks this book's tags on demand and shows a per-file row", async () => {
     let tagStatusBody: unknown = null;
+    const bookWithFiles = {
+      ...book,
+      files: [{ id: "f1", rel_path: "Dune.m4b", size: 1_000_000, mod_time: 0, ext: ".m4b", track: 1 }],
+    };
     mockFetch((path, init) => {
-      if (path === "/books/b1" && (!init || init.method === undefined)) return { body: book };
+      if (path === "/books/b1" && (!init || init.method === undefined)) return { body: bookWithFiles };
       if (path === "/books/b1/candidates") return { body: [] };
       if (path === "/settings") return { body: settings };
       if (path === "/books/tag-status" && init?.method === "POST") {
@@ -358,15 +362,50 @@ describe("BookDetail tag status", () => {
     renderBookDetail();
 
     // Not fetched automatically on page load.
-    await screen.findByText(/embedded tags/i);
+    await screen.findByRole("columnheader", { name: "Tags" });
     expect(screen.queryByText("tags differ")).not.toBeInTheDocument();
+    // The file row exists with no status yet.
+    expect(screen.getByRole("row", { name: /Dune\.m4b/ })).toHaveTextContent("—");
 
     await user.click(screen.getByRole("button", { name: /^check tags$/i }));
 
     await screen.findByText("tags differ");
-    // The per-file breakdown ("Dune.m4b — out of date") is its own list item,
-    // distinct from the summary sentence above it that also names the file.
-    expect(screen.getByRole("listitem")).toHaveTextContent("Dune.m4b");
+    expect(screen.getByRole("row", { name: /Dune\.m4b/ })).toHaveTextContent("out of date");
     expect(tagStatusBody).toEqual({ ids: ["b1"] });
+  });
+
+  it("retags via organize/apply, waits for the job, and re-checks tags", async () => {
+    let applyBody: unknown = null;
+    let tagStatusCalls = 0;
+    const bookWithFiles = {
+      ...book,
+      files: [{ id: "f1", rel_path: "Dune.m4b", size: 1_000_000, mod_time: 0, ext: ".m4b", track: 1 }],
+    };
+    mockFetch((path, init) => {
+      if (path === "/books/b1" && (!init || init.method === undefined)) return { body: bookWithFiles };
+      if (path === "/books/b1/candidates") return { body: [] };
+      if (path === "/settings") return { body: settings };
+      if (path === "/organize/apply" && init?.method === "POST") {
+        applyBody = JSON.parse(String(init.body));
+        return { body: { id: "job1", type: "organize", status: "queued", total: 0, done: 0, created_at: "" } };
+      }
+      if (path === "/jobs/job1") {
+        return { body: { id: "job1", type: "organize", status: "done", total: 1, done: 1, created_at: "" } };
+      }
+      if (path === "/books/tag-status" && init?.method === "POST") {
+        tagStatusCalls++;
+        return { body: { books: [{ id: "b1", enabled: true, match: "match" }] } };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    renderBookDetail();
+
+    await user.click(await screen.findByRole("button", { name: /^retag now$/i }));
+
+    await screen.findByText("tags match");
+    expect(applyBody).toEqual({ library_id: "L1", book_ids: ["b1"] });
+    expect(tagStatusCalls).toBe(1);
   });
 });
