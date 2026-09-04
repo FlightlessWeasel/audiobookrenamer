@@ -121,12 +121,23 @@ export interface FileMove {
   no_op: boolean;
 }
 
+// TagFilePlan is the tag-rewrite outcome planned for one file, at the same
+// index as the matching entry in BookPlan.moves. Present only when the
+// library has write_tags on.
+export interface TagFilePlan {
+  file_rel: string;
+  writable: boolean;
+  changed: boolean;
+  reason?: string;
+}
+
 export interface BookPlan {
   book_id: string;
   title: string;
   moves: FileMove[];
   skip: boolean;
   reason?: string;
+  tag_files?: TagFilePlan[];
 }
 
 export interface OrganizePlan {
@@ -465,6 +476,15 @@ function vFileMove(raw: unknown): FileMove {
     no_op: looseBool(o.no_op),
   };
 }
+function vTagFilePlan(raw: unknown): TagFilePlan {
+  const o = obj(raw, "tag file plan");
+  return {
+    file_rel: looseStr(o.file_rel),
+    writable: looseBool(o.writable),
+    changed: looseBool(o.changed),
+    reason: optStr(o.reason),
+  };
+}
 function vBookPlan(raw: unknown): BookPlan {
   const o = obj(raw, "book plan");
   return {
@@ -474,6 +494,9 @@ function vBookPlan(raw: unknown): BookPlan {
     moves: Array.isArray(o.moves) ? o.moves.map(vFileMove) : [],
     skip: looseBool(o.skip),
     reason: optStr(o.reason),
+    // Present only when the library has write_tags on; undefined (not []) is
+    // how the UI tells "not applicable" from "applicable, nothing planned".
+    tag_files: Array.isArray(o.tag_files) ? o.tag_files.map(vTagFilePlan) : undefined,
   };
 }
 function vOrganizePlan(raw: unknown): OrganizePlan {

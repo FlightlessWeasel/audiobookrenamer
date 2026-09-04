@@ -329,3 +329,77 @@ describe("OrganizePage all-no-op plan", () => {
     expect(screen.getByRole("button", { name: /apply/i })).toBeDisabled();
   });
 });
+
+describe("OrganizePage tag-writing preview", () => {
+  // tag_files is only present when the library's write_tags is on; per-file it
+  // says whether that file's tags would change and, if the container has no
+  // writer, why not.
+  it("shows a rewrite summary and per-file tag status when the plan includes tag_files", async () => {
+    mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) return { body: { books: [book("a1", "A")], counts: {} } };
+      if (path === "/organize/preview") {
+        return {
+          body: {
+            library_id: "A",
+            root_path: "/x",
+            books: [
+              {
+                book_id: "a1",
+                title: "Book a1",
+                skip: false,
+                moves: [
+                  { from_rel: "a/01.mp3", to_rel: "b/01.mp3", no_op: false },
+                  { from_rel: "a/02.ogg", to_rel: "b/02.ogg", no_op: false },
+                ],
+                tag_files: [
+                  { file_rel: "a/01.mp3", writable: true, changed: true },
+                  { file_rel: "a/02.ogg", writable: false, reason: "tag writing is not supported for .ogg files" },
+                ],
+              },
+            ],
+          },
+        };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(<OrganizePage />, { wrapper: MemoryRouter });
+    await waitFor(() => expect(screen.getByText("1 of 1 matched books")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /preview/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/apply will rewrite embedded tags on 1 file/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText("(tags will update)")).toBeInTheDocument();
+    expect(screen.getByText("(tags not supported)")).toBeInTheDocument();
+  });
+
+  it("shows no tag-writing summary when tag_files is absent (write_tags off)", async () => {
+    mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) return { body: { books: [book("a1", "A")], counts: {} } };
+      if (path === "/organize/preview") {
+        return {
+          body: {
+            library_id: "A",
+            root_path: "/x",
+            books: [
+              { book_id: "a1", title: "Book a1", skip: false, moves: [{ from_rel: "a", to_rel: "b", no_op: false }] },
+            ],
+          },
+        };
+      }
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(<OrganizePage />, { wrapper: MemoryRouter });
+    await waitFor(() => expect(screen.getByText("1 of 1 matched books")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /preview/i }));
+
+    await screen.findByText("b");
+    expect(screen.queryByText(/rewrite embedded tags/i)).not.toBeInTheDocument();
+  });
+});

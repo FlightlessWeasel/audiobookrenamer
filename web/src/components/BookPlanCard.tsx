@@ -24,14 +24,25 @@ export function BookPlanCard({ plan }: { plan: BookPlan }) {
       </div>
       {!plan.skip && (
         <ul className="mt-2 space-y-1 font-mono text-xs">
-          {plan.moves.map((m, i) => (
-            <li key={i} className={m.no_op ? "text-slate-400" : ""}>
-              <span className="text-slate-500">{m.from_rel}</span>
-              <span className="mx-1">→</span>
-              <span>{m.to_rel}</span>
-              {m.no_op && <span className="ml-2 text-slate-400">(no change)</span>}
-            </li>
-          ))}
+          {plan.moves.map((m, i) => {
+            const tf = plan.tag_files?.[i];
+            return (
+              <li key={i} className={m.no_op ? "text-slate-400" : ""}>
+                <span className="text-slate-500">{m.from_rel}</span>
+                <span className="mx-1">→</span>
+                <span>{m.to_rel}</span>
+                {m.no_op && <span className="ml-2 text-slate-400">(no change)</span>}
+                {tf && !tf.writable && (
+                  <span className="ml-2 text-slate-400" title={tf.reason}>
+                    (tags not supported)
+                  </span>
+                )}
+                {tf?.writable && tf.changed && (
+                  <span className="ml-2 text-sky-600 dark:text-sky-400">(tags will update)</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -51,4 +62,16 @@ export function planHasWork(plan: OrganizePlan): boolean {
 // Whether the plan actually moves a file, as opposed to only finalizing state.
 export function planHasRealMoves(plan: OrganizePlan): boolean {
   return plan.books.some((b) => !b.skip && b.moves.some((m) => !m.no_op));
+}
+
+// Counts files across the plan whose tags Apply would rewrite. tag_files is
+// only present at all when the library has write_tags on, so this is also
+// how the page knows whether to show a tag-writing summary at all.
+export function planTagWriteCount(plan: OrganizePlan): number {
+  let n = 0;
+  for (const b of plan.books) {
+    if (b.skip || !b.tag_files) continue;
+    for (const tf of b.tag_files) if (tf.writable && tf.changed) n++;
+  }
+  return n;
 }

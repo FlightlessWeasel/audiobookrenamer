@@ -11,7 +11,7 @@ import {
 } from "../lib/groupBooks";
 import { useGroupBy } from "../lib/useGroupBy";
 import { formatScore, scoreClass } from "../lib/matchScore";
-import { BookPlanCard, planHasRealMoves, planHasWork } from "../components/BookPlanCard";
+import { BookPlanCard, planHasRealMoves, planHasWork, planTagWriteCount } from "../components/BookPlanCard";
 import { TriStateCheckbox } from "../components/TriStateCheckbox";
 
 export function OrganizePage() {
@@ -135,6 +135,7 @@ export function OrganizePage() {
 
   const hasWork = plan ? planHasWork(plan) : false;
   const hasRealMoves = plan ? planHasRealMoves(plan) : false;
+  const tagWriteCount = plan ? planTagWriteCount(plan) : 0;
 
   return (
     <div className="space-y-5">
@@ -272,6 +273,11 @@ export function OrganizePage() {
           {hasWork && !hasRealMoves && (
             <p className="text-sm text-slate-500">
               No files need to move — Apply will just update these books' status to organized.
+            </p>
+          )}
+          {tagWriteCount > 0 && (
+            <p className="rounded bg-sky-100 px-3 py-2 text-sm text-sky-800 dark:bg-sky-950 dark:text-sky-200">
+              Apply will rewrite embedded tags on {tagWriteCount} file{tagWriteCount === 1 ? "" : "s"}.
             </p>
           )}
           {plan.books.map((bp) => (
