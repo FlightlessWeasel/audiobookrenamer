@@ -162,9 +162,16 @@ func unitForDir(dir string, files []ScannedFile) Unit {
 // That run is FOUND, not guessed. Filenames carry digit runs that have nothing
 // to do with track order: a year in "Tarnished Knight (2012) (07)", the codec
 // in "- MP3 -", a bitrate in "64kbps". Any fixed position (the first run, the
-// last run) is wrong for some real naming scheme, so every aligned position is
-// tested and the first one shaped like a track numbering wins. A year or codec
-// cannot win: it is identical in every name, and trackRunStart rejects repeats.
+// last run) is wrong for some real naming scheme, so every shared run position
+// is tested - counting from the start of the name and then from the end - and
+// the first one shaped like a track numbering wins. A year or codec cannot win:
+// it is identical in every name, and trackRunStart rejects repeats.
+//
+// The from-the-end pass is what rescues a folder whose files follow several
+// unrelated naming schemes ("The_Lion_18.mp3" beside "The Horus Heresy 20 - The
+// Primarchs (2017) - 015.mp3"): the only run they share counting from the front
+// is a series number or year that repeats across files, but the track number is
+// the last run in every name.
 //
 // When nothing qualifies the caller falls back to sorted file order.
 func sequenceIndex(files []ScannedFile) ([]int, bool) {
@@ -185,28 +192,36 @@ func sequenceIndex(files []ScannedFile) ([]int, bool) {
 	}
 	// Only positions every file has can be compared; a name carrying extra runs
 	// ("02 - Chapter 1.mp3" beside "01 - Intro.mp3") is still indexed by the
-	// positions its siblings share.
-	for pos := 0; pos < minRuns; pos++ {
-		vals := runsAt(runs, pos)
-		start, ok := trackRunStart(vals)
-		if !ok {
-			continue
+	// positions its siblings share. Left alignment indexes it by the leading
+	// shared runs, right alignment by the trailing ones.
+	for _, fromEnd := range []bool{false, true} {
+		for pos := 0; pos < minRuns; pos++ {
+			vals := alignedRun(runs, pos, fromEnd)
+			start, ok := trackRunStart(vals)
+			if !ok {
+				continue
+			}
+			idx := make([]int, n)
+			for i, v := range vals {
+				idx[i] = v + 1 - start // a 0-based run on disk is still track 1..N
+			}
+			return idx, true
 		}
-		idx := make([]int, n)
-		for i, v := range vals {
-			idx[i] = v + 1 - start // a 0-based run on disk is still track 1..N
-		}
-		return idx, true
 	}
 	return nil, false
 }
 
-// runsAt collects digit run number pos from every file. Callers must keep pos
-// below the shortest run list.
-func runsAt(runs [][]int, pos int) []int {
+// alignedRun collects one digit run from every file: the run at position pos
+// counted from the start of each file's run list, or from the end when fromEnd
+// is set. Callers must keep pos below the shortest run list.
+func alignedRun(runs [][]int, pos int, fromEnd bool) []int {
 	vals := make([]int, len(runs))
 	for i, r := range runs {
-		vals[i] = r[pos]
+		if fromEnd {
+			vals[i] = r[len(r)-1-pos]
+		} else {
+			vals[i] = r[pos]
+		}
 	}
 	return vals
 }

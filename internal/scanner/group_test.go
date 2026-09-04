@@ -205,6 +205,46 @@ func TestGroup_IndexSurroundedByOtherNumbers(t *testing.T) {
 	}
 }
 
+// Regression: one folder holding several unrelated naming schemes. The only
+// digit run every name shares counting from the front is a series number or a
+// year that repeats across files, so the left-aligned pass finds no track
+// numbering. The real track number is the last run in every name; the
+// right-aligned pass must pick it up rather than leaving the files numbered by
+// alphabetical path order (which puts "The Horus Heresy ..." first).
+func TestGroup_MixedNamingSchemesNumberedByTrailingRun(t *testing.T) {
+	root := t.TempDir()
+	want := map[string]int{}
+	add := func(rel string, track int) {
+		mk(t, root, "Book/"+rel)
+		want[rel] = track
+	}
+	for i := 1; i <= 14; i++ {
+		add(fmt.Sprintf("The_Reflection_Crackd_%02d.mp3", i), i)
+	}
+	for i := 15; i <= 17; i++ {
+		add(fmt.Sprintf("The Horus Heresy 20 - The Primarchs (2017) - %03d.mp3", i), i)
+	}
+	for i := 18; i <= 26; i++ {
+		add(fmt.Sprintf("The_Lion_%d.mp3", i), i)
+	}
+	for i := 27; i <= 30; i++ {
+		add(fmt.Sprintf("The_Serpent_Beneath_%d.mp3", i), i)
+	}
+
+	units, err := Group(context.Background(), root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(units) != 1 {
+		t.Fatalf("want 1 unit, got %v", summarize(units))
+	}
+	for _, row := range fileRows(units[0]) {
+		if want[row.RelPath] != row.Track {
+			t.Fatalf("%s: track %d, want %d", row.RelPath, row.Track, want[row.RelPath])
+		}
+	}
+}
+
 // The found index, not the file's position, is what numbers the tracks.
 func TestSequenceIndex_Values(t *testing.T) {
 	seqOf := func(names ...string) []int {
