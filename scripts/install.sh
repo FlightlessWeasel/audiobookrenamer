@@ -18,14 +18,17 @@ set -euo pipefail
 #   curl -fsSL https://github.com/FlightlessWeasel/audiobookrenamer/releases/latest/download/install.sh | sudo bash
 #   curl -fsSL https://github.com/FlightlessWeasel/audiobookrenamer/releases/latest/download/install.sh | sudo bash -s -- --update
 #
-# The layout matches the .deb package: binary in /usr/bin, state (SQLite DB,
-# provider keys, session secret) in /var/lib/<service>.
+# Layout: binary in /opt/<service>/<service>, state (SQLite DB, provider keys,
+# session secret) in /var/lib/<service>. The binary lives under /opt, owned by
+# the service user, so the in-app updater (Settings -> Updates) can replace it
+# in place. The .deb package instead installs to /usr/bin and is managed by
+# apt, which is why in-app self-update is disabled for .deb installs.
 # ─────────────────────────────────────────────────────────
 
 REPO="${ABR_REPO:-FlightlessWeasel/audiobookrenamer}"
 SVC_NAME="audiobookrenamer"
 SVC_USER="audiobookrenamer"
-BINDIR="/usr/bin"
+BINDIR=""           # empty => /opt/<service> (resolved after arg parsing)
 PORT="8674"
 VERSION=""          # empty => latest
 DO_UPDATE=false
@@ -43,7 +46,8 @@ Usage: install.sh [options]
   --repo OWNER/NAME   GitHub repo to fetch releases from. Default: ${REPO}.
   --service NAME      systemd service + state-dir name. Default: ${SVC_NAME}.
   --user NAME         Service account to create and run as. Default: ${SVC_USER}.
-  --bindir PATH       Directory to install the binary into. Default: ${BINDIR}.
+  --bindir PATH       Directory to install the binary into. Default: /opt/${SVC_NAME}.
+                      Must be writable by --user for in-app self-update to work.
   --port PORT         TCP port the server listens on (ABR_ADDR=:PORT). Default: ${PORT}.
   --no-start          Install and enable the unit but do not start it now.
   --force             Reinstall / rewrite the unit even if already at the target version.
@@ -72,11 +76,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+BINDIR="${BINDIR:-/opt/${SVC_NAME}}"
 BIN="${BINDIR}/${SVC_NAME}"
 BACKUP="${BIN}.bak"
 STATE_DIR="/var/lib/${SVC_NAME}"
 VERSION_FILE="${STATE_DIR}/.version"
 UNIT_FILE="/etc/systemd/system/${SVC_NAME}.service"
+# Pre-0.1.22 installs put the binary here; --update relocates them to $BIN.
+LEGACY_BIN="/usr/bin/${SVC_NAME}"
 
 die()  { echo "error: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
@@ -168,9 +175,12 @@ ensure_user() {
 }
 
 # ── systemd unit ────────────────────────────────────────
-# Kept in sync with packaging/audiobookrenamer.service (the .deb ships that
-# copy). ProtectHome is off on purpose: the whole job is renaming media files
-# in place, wherever the library lives (often under /home, /srv, or /mnt).
+# Mirrors packaging/audiobookrenamer.service except for ExecStart: this unit
+# runs the binary from /opt so the service can self-update; the .deb runs it
+# from /usr/bin under apt's control. ProtectHome is off on purpose: the whole
+# job is renaming media files in place, wherever the library lives (often under
+# /home, /srv, or /mnt). ProtectSystem=true leaves /opt writable, and the
+# service user owns ${BINDIR}, so the in-app updater can replace the binary.
 write_unit() {
   info "writing ${UNIT_FILE}"
   cat > "$UNIT_FILE" <<EOF
@@ -203,14 +213,16 @@ EOF
 
 install_binary() {
   local src="$1"
-  mkdir -p "$BINDIR"
+  # The dir and binary are owned by the service user so the in-app updater can
+  # rewrite the binary in place. install -d re-chowns an existing dir too.
+  install -d -o "$SVC_USER" -g "$SVC_USER" -m 0755 "$BINDIR"
   if [[ -f "$BIN" ]]; then
     cp -p "$BIN" "$BACKUP"
     echo "    backed up existing binary to ${BACKUP}"
   fi
   local tmp
   tmp="$(mktemp "${BIN}.new.XXXXXX")"
-  install -m 0755 "$src" "$tmp"
+  install -o "$SVC_USER" -g "$SVC_USER" -m 0755 "$src" "$tmp"
   mv -f "$tmp" "$BIN"
 }
 
@@ -261,18 +273,49 @@ download_release "$TAG" "$ARCH" "$WORK"
 
 # ── update path ─────────────────────────────────────────
 if $DO_UPDATE; then
-  [[ -f "$BIN" ]] || die "--update: no existing install at ${BIN} (run without --update first)"
+  RELOCATED_FROM=""
+  if [[ ! -f "$BIN" && "$BIN" != "$LEGACY_BIN" && -f "$LEGACY_BIN" ]]; then
+    info "relocating binary out of /usr/bin so the service can self-update: ${LEGACY_BIN} -> ${BIN}"
+    RELOCATED_FROM="$LEGACY_BIN"
+  fi
+  [[ -f "$BIN" || -n "$RELOCATED_FROM" ]] \
+    || die "--update: no existing install at ${BIN} (run without --update first)"
+
   install_binary "$EXTRACTED"
   echo "$TAG" > "$VERSION_FILE"
+
+  # Point the unit at $BIN whenever it is stale — always so on a relocation,
+  # but also picks up a hand-moved binary.
+  UNIT_REPOINTED=false
+  if [[ -f "$UNIT_FILE" ]] && ! grep -qxF "ExecStart=${BIN}" "$UNIT_FILE"; then
+    info "updating ExecStart in ${UNIT_FILE} -> ${BIN}"
+    sed -i "s#^ExecStart=.*#ExecStart=${BIN}#" "$UNIT_FILE"
+    systemctl daemon-reload
+    UNIT_REPOINTED=true
+  fi
+
   if systemctl is-enabled "$SVC_NAME" >/dev/null 2>&1; then
     info "restarting ${SVC_NAME}"
     if ! systemctl restart "$SVC_NAME" || ! wait_active; then
-      echo "    service did not come back up" >&2
-      rollback_binary
+      echo "    service did not come back up — rolling back" >&2
+      if [[ -n "$RELOCATED_FROM" ]]; then
+        if $UNIT_REPOINTED; then
+          sed -i "s#^ExecStart=.*#ExecStart=${RELOCATED_FROM}#" "$UNIT_FILE"
+          systemctl daemon-reload
+        fi
+        rm -f "$BIN"
+        systemctl restart "$SVC_NAME" || true
+      else
+        rollback_binary
+      fi
       echo "$CURRENT" > "$VERSION_FILE"
       die "update failed — rolled back to previous binary"
     fi
     echo "    restarted on ${TAG}"
+    if [[ -n "$RELOCATED_FROM" ]]; then
+      rm -f "$RELOCATED_FROM" "${RELOCATED_FROM}.bak"
+      echo "    removed old binary ${RELOCATED_FROM}"
+    fi
   else
     echo "    service ${SVC_NAME} not enabled — binary updated, start it yourself"
   fi
@@ -311,6 +354,7 @@ cat <<EOF
 audiobookrenamer ${TAG} is installed.
 
   Web UI:   http://<this-host>:${PORT}/
+  Binary:   ${BIN}   (service-owned, so Settings -> Updates can self-update)
   State:    ${STATE_DIR}   (SQLite DB, provider API keys, session secret)
   Service:  systemctl status ${SVC_NAME}
   Logs:     journalctl -u ${SVC_NAME} -f

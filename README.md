@@ -125,9 +125,11 @@ sudo systemctl enable --now audiobookrenamer   # listens on :8674
 
 For servers without `apt`/`dpkg`, `scripts/install.sh` fetches the release
 archive for the host's architecture, creates the `audiobookrenamer` service
-user, installs the binary to `/usr/bin`, writes the `systemd` unit, and starts
-it. State (SQLite DB, provider keys, session secret) lives in
-`/var/lib/audiobookrenamer`.
+user, installs the binary to `/opt/audiobookrenamer/`, writes the `systemd`
+unit, and starts it. State (SQLite DB, provider keys, session secret) lives in
+`/var/lib/audiobookrenamer`. The binary is owned by the service user and lives
+outside `/usr`, so in-app self-update (Settings → Updates) can replace it;
+`--update` on a pre-0.1.22 install relocates it out of `/usr/bin` for you.
 
 ```sh
 # Fresh install (latest release)
