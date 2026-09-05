@@ -19,9 +19,9 @@ import { TriStateCheckbox } from "../components/TriStateCheckbox";
 const STATES = ["unmatched", "needs_review", "matched", "organized", "error"] as const;
 
 // Checking tags means reading every listed file on disk, so it is an explicit
-// action rather than something that fires on every list load, and it is
-// capped to a batch the server will actually accept in one call (see
-// maxTagStatusIDs in internal/api/books_tags.go).
+// action rather than something that fires on every list load. One request can
+// only carry this many ids (see maxTagStatusIDs in internal/api/books_tags.go),
+// so a longer list is walked in chunks of this size rather than in one call.
 const MAX_TAG_CHECK = 200;
 
 export function BooksPage() {
@@ -42,6 +42,10 @@ export function BooksPage() {
   const libName = useMemo(() => {
     const m = new Map(libs.data?.map((l) => [l.id, l.name]));
     return (id: string) => m.get(id) ?? "—";
+  }, [libs.data]);
+  const libRoot = useMemo(() => {
+    const m = new Map(libs.data?.map((l) => [l.id, l.root_path]));
+    return (id: string) => m.get(id) ?? "";
   }, [libs.data]);
 
   const counts = books.data?.counts ?? {};
@@ -77,10 +81,14 @@ export function BooksPage() {
 
   function checkTags() {
     const ids = allBooks.map((b) => b.id);
-    if (ids.length === 0 || ids.length > MAX_TAG_CHECK) return;
+    if (ids.length === 0) return;
     runTagCheck(async () => {
-      const results = await client.tagStatus(ids);
-      if (mounted.current) {
+      // A library can easily list more books than one request is allowed to
+      // carry, so this walks the full list in MAX_TAG_CHECK-sized chunks
+      // rather than refusing to run at all above that count.
+      for (let i = 0; i < ids.length; i += MAX_TAG_CHECK) {
+        const results = await client.tagStatus(ids.slice(i, i + MAX_TAG_CHECK));
+        if (!mounted.current) return;
         setTagStatuses((prev) => {
           const next = new Map(prev);
           for (const r of results) next.set(r.id, r);
@@ -152,10 +160,10 @@ export function BooksPage() {
         />
         <button
           onClick={checkTags}
-          disabled={checkingTags || allBooks.length === 0 || allBooks.length > MAX_TAG_CHECK}
+          disabled={checkingTags || allBooks.length === 0}
           title={
             allBooks.length > MAX_TAG_CHECK
-              ? `Narrow the filter to ${MAX_TAG_CHECK} or fewer books to check tags`
+              ? `Reads each listed file's embedded tags in batches of ${MAX_TAG_CHECK}`
               : "Reads each listed file's embedded tags and compares them to this book's accepted metadata"
           }
           className="rounded border border-slate-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-slate-700"
@@ -284,6 +292,7 @@ export function BooksPage() {
                           key={b.id}
                           book={b}
                           libName={libName}
+                          libRoot={libRoot}
                           checked={selected.has(b.id)}
                           onToggle={() => toggle(b.id)}
                           tagStatus={tagStatuses.get(b.id)}
@@ -297,6 +306,7 @@ export function BooksPage() {
                     key={b.id}
                     book={b}
                     libName={libName}
+                    libRoot={libRoot}
                     checked={selected.has(b.id)}
                     onToggle={() => toggle(b.id)}
                     tagStatus={tagStatuses.get(b.id)}
@@ -416,15 +426,31 @@ function basename(b: Book) {
   return p.split(/[\\/]/).pop() ?? p;
 }
 
+// The book's source path as stored is absolute on the server's filesystem,
+// which is mostly noise in a list of many books; strip the library's own
+// root off it so what's left is just where the book lives inside that
+// library. Falls back to the full path if it doesn't start with root (e.g.
+// root not loaded yet), rather than guessing at a wrong prefix.
+function libRelativePath(path: string, root: string): string {
+  const norm = (p: string) => p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const p = norm(path);
+  const r = norm(root);
+  if (!r) return p;
+  if (p === r) return ".";
+  return p.startsWith(r + "/") ? p.slice(r.length + 1) : p;
+}
+
 function BookRow({
   book: b,
   libName,
+  libRoot,
   checked,
   onToggle,
   tagStatus,
 }: {
   book: Book;
   libName: (id: string) => string;
+  libRoot: (id: string) => string;
   checked: boolean;
   onToggle: () => void;
   tagStatus?: TagStatus;
@@ -443,12 +469,16 @@ function BookRow({
         <Link to={`/books/${b.id}`} className="font-medium hover:underline">
           {b.title || <span className="text-slate-400">{basename(b)}</span>}
         </Link>
-        {b.series && (
-          <span className="ml-2 text-xs text-slate-400">
-            {b.series} {b.series_index}
-          </span>
+        {(b.subtitle || b.series) && (
+          <div className="truncate text-xs text-slate-400">
+            {[b.subtitle, b.series && `${b.series}${b.series_index ? ` ${b.series_index}` : ""}`]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
         )}
-        <div className="truncate text-xs text-slate-400">{b.source_file || b.source_dir}</div>
+        <div className="truncate text-xs text-slate-400">
+          {libRelativePath(b.source_file || b.source_dir, libRoot(b.library_id))}
+        </div>
       </td>
       <td className="px-3 py-2">{b.author || "—"}</td>
       <td className="px-3 py-2">{libName(b.library_id)}</td>

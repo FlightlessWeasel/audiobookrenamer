@@ -195,4 +195,46 @@ describe("BooksPage tag status", () => {
       expect(screen.getByRole("button", { name: /check tags/i })).toBeDisabled(),
     );
   });
+
+  it("stays enabled and checks in batches for a list bigger than one request can carry", async () => {
+    // One over the server's per-request id cap: a single library this size
+    // used to disable the button outright with no way to check any of it.
+    const manyBooks = Array.from({ length: 201 }, (_, i) => ({
+      id: `m${i}`,
+      library_id: "L1",
+      title: `Book ${i}`,
+      author: "Author",
+      state: "matched",
+      layout: "single",
+      source_file: `/one/book${i}.m4b`,
+    }));
+    const requestedBatches: string[][] = [];
+    mockFetch((path, init) => {
+      if (path === "/libraries") return { body: libs };
+      if (path === "/books/tag-status" && init?.method === "POST") {
+        const { ids } = JSON.parse(String(init.body)) as { ids: string[] };
+        requestedBatches.push(ids);
+        return { body: { books: ids.map((id) => ({ id, enabled: true, match: "match" })) } };
+      }
+      if (path.startsWith("/books")) return { body: { books: manyBooks, counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("link", { name: "Book 0" });
+
+    const button = screen.getByRole("button", { name: /check tags/i });
+    expect(button).toBeEnabled();
+    await user.click(button);
+
+    await waitFor(() => expect(requestedBatches).toHaveLength(2));
+    expect(requestedBatches[0]).toHaveLength(200);
+    expect(requestedBatches[1]).toHaveLength(1);
+    expect(await screen.findAllByText("tags match")).toHaveLength(201);
+  });
 });
