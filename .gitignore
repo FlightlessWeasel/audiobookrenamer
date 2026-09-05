@@ -29,3 +29,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# Local agent instructions — kept out of the published repo.
+/CLAUDE.md
+/AGENTS.md
