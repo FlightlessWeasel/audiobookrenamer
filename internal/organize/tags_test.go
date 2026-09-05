@@ -208,8 +208,47 @@ func TestExecute_TagWriteIsNoOpOnSecondRun(t *testing.T) {
 	}
 }
 
-// Undo restores a file's pre-write tags and consumes (deletes) its backup.
-func TestUndo_RestoresTagsAfterOrganize(t *testing.T) {
+// A tag-write's backup is removed as soon as the run that made it fully
+// commits — there is nothing left for that run's own rollback to restore, and
+// leaving it in place would mean a library's first-ever retag leaves a full
+// duplicate of it sitting in the backup directory forever, since nothing
+// would ever supersede a first-time backup to reclaim the space.
+func TestExecute_RemovesTagBackupAfterSuccess(t *testing.T) {
+	d := openTestDB(t)
+	lib, b := tagWriteLibrary(t, d, false)
+
+	plan, err := BuildPlan(d, lib.ID, []string{b.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, _ := d.CreateJobPayload(model.JobOrganize, lib.ID, "")
+	backupDir := t.TempDir()
+	plan.BackupDir = backupDir
+	if err := Execute(context.Background(), d, job.ID, plan, nil); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	target := organizedPath(lib)
+	if got := readTags(t, target); got.Title != "Elantris" {
+		t.Fatalf("tags after execute = %+v", got)
+	}
+
+	entries, err := os.ReadDir(backupDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("backup dir has %d leftover file(s) after a successful run: %v", len(entries), entries)
+	}
+}
+
+// Once a job has fully committed, Undo can still reverse its file move but
+// can no longer restore the tags it wrote — their backup is already gone (see
+// TestExecute_RemovesTagBackupAfterSuccess). This is the accepted cost of not
+// keeping a duplicate of the library around indefinitely: only a same-run
+// failure (TestExecute_TagWriteFailureRollsBackMoves) still has the backup
+// available to restore from.
+func TestUndo_CannotRestoreTagsOnceJobHasCommitted(t *testing.T) {
 	d := openTestDB(t)
 	lib, b := tagWriteLibrary(t, d, false)
 
@@ -232,13 +271,18 @@ func TestUndo_RestoresTagsAfterOrganize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("undo: %v", err)
 	}
-	if len(res.UnrestoredTagFiles) != 0 {
-		t.Fatalf("unexpected unrestored tag files: %v", res.UnrestoredTagFiles)
+	if len(res.UnrestoredTagFiles) != 1 || res.UnrestoredTagFiles[0] != target {
+		t.Fatalf("undo unrestored = %v, want [%s]", res.UnrestoredTagFiles, target)
 	}
 
+	// The move still reverses...
 	srcFile := filepath.Join(lib.RootPath, "incoming", "book.mp3")
-	if got := readTags(t, srcFile); got.Title != "" {
-		t.Fatalf("tags after undo = %+v, want restored to empty", got)
+	if _, err := os.Stat(srcFile); err != nil {
+		t.Fatalf("undo did not reverse the file move: %v", err)
+	}
+	// ...but the tags organize wrote are left standing, not reverted to empty.
+	if got := readTags(t, srcFile); got.Title != "Elantris" {
+		t.Fatalf("tags after undo = %+v, want left as written (not restorable)", got)
 	}
 
 	_, _, ok, err := d.CurrentTagBackupOwner(target)
@@ -283,12 +327,14 @@ func TestExecute_TagWriteFailureRollsBackMoves(t *testing.T) {
 	}
 }
 
-// Undo is meant to be used most-recent-job-first. Undone in that order, the
-// later job (which still owns the shared backup) restores normally; the
-// older job's own tag-write backup was reused (overwritten) by the later one
-// the moment it ran, so its own undo can no longer restore tags — it still
-// reverses its file move, and reports the file as tag-unrestored rather than
-// failing outright.
+// Two successive retags of the same file, each committing before the next
+// runs: job A's backup is deleted the moment job A succeeds, so job B (which
+// retags the same path in place) finds no existing backup to reuse and
+// allocates a fresh one — proving reuseOrAllocBackupPath handles a
+// DB-owned-but-missing backup file by allocating rather than erroring. That
+// fresh backup is in turn deleted the moment job B succeeds, so neither job's
+// Undo can restore tag content afterward; both still reverse whatever they
+// moved, and both report the file as tag-unrestored rather than failing.
 func TestUndo_SkipsTagRestoreWhenBackupSuperseded(t *testing.T) {
 	d := openTestDB(t)
 	lib, b := tagWriteLibrary(t, d, false)
@@ -338,23 +384,23 @@ func TestUndo_SkipsTagRestoreWhenBackupSuperseded(t *testing.T) {
 		t.Fatalf("tags after job B = %+v", got)
 	}
 
-	// Undo the most recent job first: it still owns the shared backup, so it
-	// restores normally (back to job A's tags) and consumes the backup.
+	// Undo the most recent job first: its own backup was deleted the instant
+	// job B committed, so there is nothing left to restore from — the tags
+	// stay exactly as job B wrote them.
 	resB, err := Undo(context.Background(), d, jobB.ID)
 	if err != nil {
 		t.Fatalf("undo B: %v", err)
 	}
-	if len(resB.UnrestoredTagFiles) != 0 {
-		t.Fatalf("undo B unrestored = %v, want none", resB.UnrestoredTagFiles)
+	if len(resB.UnrestoredTagFiles) != 1 || resB.UnrestoredTagFiles[0] != target {
+		t.Fatalf("undo B unrestored = %v, want [%s]", resB.UnrestoredTagFiles, target)
 	}
-	if got := readTags(t, target); got.Composer != "Reader A" {
-		t.Fatalf("tags after undoing job B = %+v, want restored to Reader A", got)
+	if got := readTags(t, target); got.Composer != "Reader B" {
+		t.Fatalf("tags after undoing job B = %+v, want left as Reader B (not restorable)", got)
 	}
 
 	// Undo the older job next: its move still reverses (nothing else moved
-	// this file), but the backup it recorded was overwritten by job B back
-	// when job B ran, and consumed by job B's own successful undo above, so
-	// there is nothing left to restore tags from.
+	// this file), and its own backup was likewise deleted on its own success,
+	// so the tags are left exactly as they stand (Reader B, from job B).
 	resA, err := Undo(context.Background(), d, jobA.ID)
 	if err != nil {
 		t.Fatalf("undo A: %v", err)
@@ -365,8 +411,8 @@ func TestUndo_SkipsTagRestoreWhenBackupSuperseded(t *testing.T) {
 	if _, err := os.Stat(srcFile); err != nil {
 		t.Fatalf("undo A did not reverse its own file move: %v", err)
 	}
-	if got := readTags(t, srcFile); got.Composer != "Reader A" {
-		t.Fatalf("tags after undoing job A = %+v, want left as Reader A (not restorable further)", got)
+	if got := readTags(t, srcFile); got.Composer != "Reader B" {
+		t.Fatalf("tags after undoing job A = %+v, want left as Reader B (not restorable further)", got)
 	}
 }
 

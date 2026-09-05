@@ -350,6 +350,26 @@ func Execute(ctx context.Context, database *db.DB, jobID string, plan *Plan, pro
 	if err := database.FinalizeOrganize(jobID, seq, finals); err != nil {
 		return fail(fmt.Errorf("record organize result: %w", err))
 	}
+
+	// The run has fully committed, so any tag-write backup it made has nothing
+	// left to roll back to and is removed now rather than lingering — a job
+	// that retags a whole library for the first time would otherwise leave a
+	// full duplicate of it sitting in the backup directory forever, since
+	// nothing would ever supersede a first-time backup. This does forfeit
+	// Undo's ability to restore tag content for this job once it reaches this
+	// point (only a same-run failure, handled by rollback above, still has the
+	// backup to restore from); Undo's OpTagWrite case already treats a missing
+	// backup file as "nothing to restore" rather than an error, which is
+	// exactly the state this cleanup creates.
+	for _, c := range completed {
+		if c.kind != string(OpTagWrite) {
+			continue
+		}
+		if err := os.Remove(c.src); err != nil && !os.IsNotExist(err) {
+			slog.Warn("could not remove tag backup after a successful organize run",
+				"job", jobID, "path", c.src, "err", err)
+		}
+	}
 	return nil
 }
 

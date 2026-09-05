@@ -86,11 +86,12 @@ the original, so a crash mid-write never leaves a corrupted file. It's either
 still the old tags, or fully the new ones.
 
 Before the first rewrite of a given file, its current bytes are copied to a
-backup so the run can be undone. Only the most recent backup per file is kept:
-undoing an old run after a newer one has already retagged the same file still
-reverses that run's file move, but can't restore its tags anymore (the newer
-run's tags stand). The undo result reports which files that happened to,
-rather than silently applying the wrong ones.
+backup, so a run that fails partway through can still restore the tags it
+touched. Once a run finishes successfully, its backups are deleted rather than
+kept around — undoing a run after it has already committed still reverses its
+file moves, but can no longer restore its tags (the tags it wrote stand). The
+undo result reports which files that happened to, rather than silently
+applying the wrong ones.
 
 ## Running
 
