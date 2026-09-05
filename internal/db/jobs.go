@@ -80,6 +80,17 @@ func (d *DB) ActiveUndoExists(targetJobID string) (bool, error) {
 	return false, rows.Err()
 }
 
+// ActiveJobExists reports whether any job of type t is currently queued or
+// running, so a handler can refuse to enqueue a duplicate.
+func (d *DB) ActiveJobExists(t model.JobType) (bool, error) {
+	var n int
+	err := d.QueryRow(
+		`SELECT COUNT(1) FROM jobs WHERE type = ? AND status IN (?, ?)`,
+		t, model.JobQueued, model.JobRunning,
+	).Scan(&n)
+	return n > 0, err
+}
+
 // GetJob returns one job by id, or ErrNotFound.
 func (d *DB) GetJob(id string) (model.Job, error) {
 	row := d.QueryRow(`SELECT `+jobCols+` FROM jobs WHERE id = ?`, id)

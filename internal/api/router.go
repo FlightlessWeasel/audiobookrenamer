@@ -82,6 +82,9 @@ func (s *Server) Handler() http.Handler {
 
 			pr.Get("/settings", s.getSettings)
 			pr.Patch("/settings", s.patchSettings)
+
+			pr.Get("/update", s.getUpdate)
+			pr.Post("/update/apply", s.applyUpdate)
 		})
 	})
 
@@ -111,10 +114,15 @@ func timeoutExcept(d time.Duration, skip ...string) func(http.Handler) http.Hand
 }
 
 type healthResponse struct {
-	Status string `json:"status"`
-	Time   string `json:"time"`
+	Status  string `json:"status"`
+	Time    string `json:"time"`
+	Version string `json:"version"`
 }
 
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, healthResponse{Status: "ok", Time: time.Now().UTC().Format(time.RFC3339)})
+	writeJSON(w, http.StatusOK, healthResponse{
+		Status:  "ok",
+		Time:    time.Now().UTC().Format(time.RFC3339),
+		Version: s.version,
+	})
 }

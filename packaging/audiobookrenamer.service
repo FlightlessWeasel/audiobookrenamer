@@ -1,6 +1,6 @@
 [Unit]
 Description=Audiobook Library Manager
-Documentation=https://github.com/jasonb/audiobookrenamer
+Documentation=https://github.com/FlightlessWeasel/audiobookrenamer
 After=network-online.target
 Wants=network-online.target
 
@@ -11,7 +11,10 @@ Group=audiobookrenamer
 Environment=ABR_CONFIG_DIR=/var/lib/audiobookrenamer
 Environment=ABR_ADDR=:8674
 ExecStart=/usr/bin/audiobookrenamer
-Restart=on-failure
+# "always", not "on-failure": the in-app updater re-execs in place (same PID, so
+# systemd never sees it), but if that new binary later exits cleanly for any
+# reason we still want it back. RestartSec bounds a crash loop.
+Restart=always
 RestartSec=5
 
 # Hardening. ProtectHome/ProtectSystem are left permissive because the whole

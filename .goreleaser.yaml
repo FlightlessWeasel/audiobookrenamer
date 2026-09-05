@@ -35,7 +35,7 @@ nfpms:
   - id: deb
     package_name: audiobookrenamer
     vendor: audiobookrenamer
-    homepage: https://github.com/jasonb/audiobookrenamer
+    homepage: https://github.com/FlightlessWeasel/audiobookrenamer
     maintainer: audiobookrenamer maintainers
     description: Web UI to view, match, and organize an audiobook library in place.
     license: MIT
@@ -50,6 +50,25 @@ nfpms:
 
 checksum:
   name_template: checksums.txt
+
+# Sign checksums.txt with a cosign key. The in-app updater (internal/selfupdate)
+# verifies checksums.txt.sig against a public key baked into the binary before
+# it will swap itself, so a compromised release asset alone is not enough to
+# push a malicious build. Requires COSIGN_PRIVATE_KEY + COSIGN_PASSWORD in the
+# release environment; the matching public key lives at
+# internal/selfupdate/keys/cosign.pub.
+signs:
+  - id: checksums
+    cmd: cosign
+    args:
+      - sign-blob
+      - "--key=env://COSIGN_PRIVATE_KEY"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
+    signature: "${artifact}.sig"
+    artifacts: checksum
+    output: true
 
 release:
   # Ship the headless installer alongside the archives so a server can bootstrap

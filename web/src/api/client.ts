@@ -162,7 +162,7 @@ export interface OrganizePlan {
 
 export interface Job {
   id: string;
-  type: "scan" | "match" | "organize" | "undo";
+  type: "scan" | "match" | "organize" | "undo" | "selfupdate";
   status: "queued" | "running" | "done" | "failed" | "canceled";
   library_id?: string;
   total: number;
@@ -187,6 +187,23 @@ export interface Settings {
     api_key_set: boolean;
     api_key?: string;
   };
+}
+
+// Result of GET /update. On an upstream (GitHub) failure the server still
+// answers 200 with has_update:false, empty latest/notes/url, and `reason` set
+// to a human message. `can_apply` is false (with `reason`) when the running
+// build can't replace itself in place — dev builds, containers, apt-managed
+// installs, a non-writable binary dir — and can be false while `has_update`
+// is true.
+export interface UpdateStatus {
+  current: string;
+  latest: string;
+  has_update: boolean;
+  notes: string;
+  url: string;
+  can_apply: boolean;
+  reason: string;
+  checked_at: string;
 }
 
 export class ApiError extends Error {
@@ -566,6 +583,22 @@ function vSettings(raw: unknown): Settings {
   };
 }
 
+// Lenient like the other validators: the UI renders every field defensively,
+// so a missing/mistyped one degrades to a blank/false rather than a 502.
+function vUpdateStatus(raw: unknown): UpdateStatus {
+  const o = obj(raw, "update status");
+  return {
+    current: looseStr(o.current),
+    latest: looseStr(o.latest),
+    has_update: looseBool(o.has_update),
+    notes: looseStr(o.notes),
+    url: looseStr(o.url),
+    can_apply: looseBool(o.can_apply),
+    reason: looseStr(o.reason),
+    checked_at: looseStr(o.checked_at),
+  };
+}
+
 export interface DirEntry {
   name: string;
   path: string;
@@ -609,8 +642,11 @@ export interface ReadOpts {
 }
 
 export const client = {
-  // Not consumed structurally — left untyped-at-runtime on purpose.
-  health: () => api<{ status: string; time: string }>("/healthz"),
+  // Not consumed structurally — left untyped-at-runtime on purpose. `version`
+  // is the running build's version, used to detect when the server has come
+  // back on a new build after a self-update.
+  health: () =>
+    api<{ status: string; time: string; version: string }>("/healthz"),
   logout: () => api<{ ok: boolean }>("/auth/logout", { method: "POST" }),
 
   authStatus: (opts?: ReadOpts) =>
@@ -766,6 +802,21 @@ export const client = {
     api<void>(`/jobs/${id}/cancel`, { method: "POST" }),
   undoJob: (id: string) =>
     api<Job>(`/jobs/${id}/undo`, { method: "POST" }, vJob),
+
+  // Check for a newer release. Always 200 (see UpdateStatus); a failed upstream
+  // check comes back with has_update:false and `reason` set.
+  getUpdate: (opts?: ReadOpts) =>
+    api<UpdateStatus>("/update", { signal: opts?.signal }, vUpdateStatus),
+  // Enqueue the self-update job. 409 (surfaced as an ApiError) when it can't
+  // apply / is already up to date. On success the job streams over the SSE job
+  // stream like a scan, and the server re-execs itself shortly after it
+  // finishes.
+  applyUpdate: () =>
+    api<Job>(
+      "/update/apply",
+      { method: "POST", body: JSON.stringify({}) },
+      vJob,
+    ),
 
   getSettings: (opts?: ReadOpts) =>
     api<Settings>("/settings", { signal: opts?.signal }, vSettings),

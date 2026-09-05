@@ -187,7 +187,7 @@ Group=${SVC_USER}
 Environment=ABR_CONFIG_DIR=${STATE_DIR}
 Environment=ABR_ADDR=:${PORT}
 ExecStart=${BIN}
-Restart=on-failure
+Restart=always
 RestartSec=5
 NoNewPrivileges=true
 ProtectSystem=true

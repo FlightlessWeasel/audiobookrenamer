@@ -27,8 +27,11 @@ RUN apk add --no-cache ca-certificates wget tzdata && \
 COPY --from=build /out/audiobookrenamer /usr/local/bin/audiobookrenamer
 
 USER abr
+# ABR_CONTAINER disables the in-app self-updater: a container updates by pulling
+# a new image, not by rewriting its own binary on an ephemeral layer.
 ENV ABR_CONFIG_DIR=/config \
-    ABR_ADDR=:8674
+    ABR_ADDR=:8674 \
+    ABR_CONTAINER=1
 EXPOSE 8674
 VOLUME ["/config"]
 

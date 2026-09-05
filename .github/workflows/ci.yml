@@ -68,9 +68,29 @@ jobs:
         with:
           go-version: "1.26"
 
+      - uses: sigstore/cosign-installer@v3
+
+      - name: Verify committed cosign public key matches the signing key
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign public-key --key env://COSIGN_PRIVATE_KEY > /tmp/derived.pub
+          if ! diff -u internal/selfupdate/keys/cosign.pub /tmp/derived.pub; then
+            echo "::error::internal/selfupdate/keys/cosign.pub does not match COSIGN_PRIVATE_KEY."
+            echo "The shipped binary would reject this release. Commit the correct public key."
+            exit 1
+          fi
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs checksums.txt so the in-app updater will accept the release.
+          # Create these once with `cosign generate-key-pair` and add them as
+          # repo secrets; commit the public half to
+          # internal/selfupdate/keys/cosign.pub.
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}

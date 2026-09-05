@@ -7,7 +7,9 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -22,33 +24,60 @@ import (
 	"audiobookrenamer/internal/metadata"
 	"audiobookrenamer/internal/organize"
 	"audiobookrenamer/internal/scanner"
+	"audiobookrenamer/internal/selfupdate"
 	"audiobookrenamer/internal/worker"
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
+// shutdownTimeout bounds the graceful HTTP shutdown on both the signal path and
+// the self-update restart path.
+const shutdownTimeout = 15 * time.Second
+
 func main() {
-	if err := run(); err != nil {
+	u, err := run()
+	if err != nil {
 		slog.Error("fatal", "err", err)
 		os.Exit(1)
 	}
+	// A non-nil updater means run() shut the server down for a self-update.
+	// run()'s deferred cleanup (worker drain, DB close) has fully completed by
+	// now, so this is a clean handoff. If it fails there is no listener left, so
+	// exit non-zero and let the service manager (Restart=always) take over
+	// rather than linger as a dead process.
+	if u != nil {
+		slog.Info("self-update: restarting into new binary", "path", u.ExecPath())
+		if err := u.Exec(); err != nil {
+			slog.Error("self-update: restart handoff failed", "err", err)
+			os.Exit(1)
+		}
+	}
 }
 
-func run() error {
+// run starts the server and blocks until it should stop. It returns a non-nil
+// *selfupdate.Updater only when it stopped to hand off to a freshly installed
+// binary; main then calls Exec after run's deferred cleanup has finished.
+func run() (*selfupdate.Updater, error) {
 	configPath := flag.String("config", envOr("ABR_CONFIG_FILE", ""), "path to JSON config file (optional)")
+	showVersion := flag.Bool("version", false, "print the build version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return nil, nil
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	setupLogging(cfg.LogLevel)
 	slog.Info("starting", "version", version, "addr", cfg.Addr, "config_dir", cfg.ConfigDir)
 
 	database, err := db.Open(cfg.DBPath())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer database.Close()
 
@@ -62,10 +91,17 @@ func run() error {
 	tagBackupDir := filepath.Join(cfg.ConfigDir, "tagbackups")
 	organize.Register(wm, organize.NewService(database, tagBackupDir))
 
-	apiSrv, err := api.New(cfg, database, wm, mm)
+	apiSrv, err := api.New(cfg, database, wm, mm, version)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	selfupdate.Register(wm, apiSrv.Updater)
+
+	if !apiSrv.AuthEnabled() && !bindsLoopback(cfg.Addr) {
+		slog.Warn("authentication is disabled and the server is not bound to a loopback address; "+
+			"the API, including self-update, is reachable without authentication", "addr", cfg.Addr)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Addr,
 		Handler:           apiSrv.Handler(),
@@ -83,17 +119,52 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	select {
-	case err := <-errCh:
-		return err
-	case <-ctx.Done():
-		slog.Info("shutting down")
-		// End long-lived handlers (SSE) first so Shutdown doesn't block on them.
+	// End long-lived handlers (SSE) before srv.Shutdown so it does not wait them
+	// out, then shut the server down within shutdownTimeout.
+	drainAndShutdown := func() error {
 		apiSrv.Close()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+
+	select {
+	case err := <-errCh:
+		return nil, err
+
+	case <-ctx.Done():
+		slog.Info("shutting down")
+		return nil, drainAndShutdown()
+
+	case <-apiSrv.Updater.RestartRequested():
+		slog.Info("self-update: draining before restart")
+		if err := drainAndShutdown(); err != nil {
+			// The listener is already closed by Shutdown even on timeout, so the
+			// replacement can still bind. Log and proceed with the handoff.
+			slog.Error("self-update: graceful shutdown did not complete, restarting anyway", "err", err)
+		}
+		return apiSrv.Updater, nil
+	}
+}
+
+// bindsLoopback reports whether addr (an http.Server Addr like ":8674",
+// "127.0.0.1:8674", or "[::1]:8674") binds only a loopback interface. An empty
+// host binds every interface and is not loopback.
+func bindsLoopback(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		host = addr
+	}
+	switch host {
+	case "":
+		return false
+	case "localhost":
+		return true
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
 
 func envOr(key, def string) string {

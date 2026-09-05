@@ -25,7 +25,7 @@ func serverWithWorker(t *testing.T) *Server {
 	t.Cleanup(func() { d.Close() })
 	wm := worker.New(d, 1)
 	t.Cleanup(wm.Shutdown)
-	s, err := New(config.Config{}, d, wm, nil)
+	s, err := New(config.Config{}, d, wm, nil, testVersion)
 	if err != nil {
 		t.Fatalf("new server: %v", err)
 	}

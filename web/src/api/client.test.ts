@@ -65,6 +65,52 @@ describe("api client", () => {
   });
 });
 
+describe("update endpoints", () => {
+  const status = {
+    current: "v1.2.3",
+    latest: "v1.3.0",
+    has_update: true,
+    notes: "## Fixes\n- a thing",
+    url: "https://github.com/x/y/releases/tag/v1.3.0",
+    can_apply: true,
+    reason: "",
+    checked_at: "2026-09-05T12:00:00Z",
+  };
+
+  it("getUpdate GETs /api/update and parses the body", async () => {
+    const fn = mockFetch(() => ({ body: status }));
+    const s = await client.getUpdate();
+    expect(fn.mock.calls[0][0]).toBe("/api/update");
+    expect(fn.mock.calls[0][1]?.method ?? "GET").toBe("GET");
+    expect(s).toMatchObject({
+      current: "v1.2.3",
+      latest: "v1.3.0",
+      has_update: true,
+      can_apply: true,
+    });
+  });
+
+  it("applyUpdate POSTs an empty body to /api/update/apply and parses the Job", async () => {
+    const fn = mockFetch(() => ({
+      status: 202,
+      body: { id: "j1", type: "selfupdate", status: "queued", total: 0, done: 0, created_at: "" },
+    }));
+    const job = await client.applyUpdate();
+    expect(fn.mock.calls[0][0]).toBe("/api/update/apply");
+    expect(fn.mock.calls[0][1]?.method).toBe("POST");
+    expect(fn.mock.calls[0][1]?.body).toBe("{}");
+    expect(job).toMatchObject({ id: "j1", type: "selfupdate", status: "queued" });
+  });
+
+  it("surfaces a 409 from applyUpdate as the standard ApiError", async () => {
+    mockFetch(() => ({ status: 409, body: { error: "already up to date" } }));
+    const err = await client.applyUpdate().catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.status).toBe(409);
+    expect(err.message).toBe("already up to date");
+  });
+});
+
 describe("response validation", () => {
   it("rejects a list endpoint that returns a non-array", async () => {
     mockFetch(() => ({ body: { not: "an array" } }));

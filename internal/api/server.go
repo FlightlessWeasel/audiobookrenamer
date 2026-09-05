@@ -13,6 +13,7 @@ import (
 	"audiobookrenamer/internal/config"
 	"audiobookrenamer/internal/db"
 	"audiobookrenamer/internal/matcher"
+	"audiobookrenamer/internal/selfupdate"
 	"audiobookrenamer/internal/worker"
 )
 
@@ -22,6 +23,13 @@ type Server struct {
 	DB      *db.DB
 	Worker  *worker.Manager
 	Matcher *matcher.Matcher
+
+	// version is the running build's version string (from main, via ldflags).
+	// Surfaced on /api/healthz and used by the self-update endpoints.
+	version string
+	// Updater backs the /api/update endpoints. Always constructed; CanApply
+	// gates whether an update can actually be applied for this install.
+	Updater *selfupdate.Updater
 
 	// authSecret is the session-signing key, loaded/generated once at startup
 	// so no request ever has to write it.
@@ -34,14 +42,17 @@ type Server struct {
 }
 
 // New returns a Server, loading (or generating and persisting) the auth signing
-// secret up front.
-func New(cfg config.Config, database *db.DB, wm *worker.Manager, mm *matcher.Matcher) (*Server, error) {
+// secret up front. version is the running build's version string, surfaced on
+// /api/healthz and driving the self-update endpoints.
+func New(cfg config.Config, database *db.DB, wm *worker.Manager, mm *matcher.Matcher, version string) (*Server, error) {
 	secret, err := loadOrCreateAuthSecret(database)
 	if err != nil {
 		return nil, fmt.Errorf("initialize auth secret: %w", err)
 	}
 	return &Server{
 		Cfg: cfg, DB: database, Worker: wm, Matcher: mm,
+		version:    version,
+		Updater:    selfupdate.New(version),
 		authSecret: secret,
 		shutdown:   make(chan struct{}),
 	}, nil
@@ -51,6 +62,11 @@ func New(cfg config.Config, database *db.DB, wm *worker.Manager, mm *matcher.Mat
 func (s *Server) Close() {
 	s.shutdownOnce.Do(func() { close(s.shutdown) })
 }
+
+// AuthEnabled reports whether API requests currently require authentication.
+// main uses it at startup to warn about unauthenticated exposure on a
+// non-loopback bind address.
+func (s *Server) AuthEnabled() bool { return s.authSettings().Enabled }
 
 const maxBodyBytes = 1 << 20 // 1 MiB
 

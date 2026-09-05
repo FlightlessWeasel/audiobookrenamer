@@ -154,10 +154,11 @@ type Candidate struct {
 type JobType string
 
 const (
-	JobScan     JobType = "scan"
-	JobMatch    JobType = "match"
-	JobOrganize JobType = "organize"
-	JobUndo     JobType = "undo"
+	JobScan       JobType = "scan"
+	JobMatch      JobType = "match"
+	JobOrganize   JobType = "organize"
+	JobUndo       JobType = "undo"
+	JobSelfUpdate JobType = "selfupdate"
 )
 
 // JobStatus is the lifecycle state of a background job.

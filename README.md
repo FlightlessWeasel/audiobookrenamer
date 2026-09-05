@@ -19,6 +19,9 @@ embedded tags to match, opt-in per library.
 - Optionally rewrite each file's embedded tags, and cover art, to match the
   accepted metadata (see [Tag writing](#tag-writing)).
 - Optional login (off by default) plus an API key for automation.
+- Self-update from the web UI: checks GitHub for the latest release, verifies
+  its signature, swaps the binary in place, and restarts. Disabled for
+  container and `apt` installs (update the image or use `apt` instead).
 - Single static binary with the web UI embedded; Docker image and `.deb`
   package available.
 
@@ -138,6 +141,30 @@ Useful flags: `--version vX.Y.Z`, `--os-upgrade`, `--port`, `--no-start`,
 `--force`. Run `install.sh --help` for the full list. The `.deb` and the script
 install to the same layout, so pick one.
 
+### Updating from the web UI
+
+Settings → Updates shows the running version and a **Check for updates** button
+that queries the GitHub Releases API. When a newer release exists, **Update &
+restart** applies it as a background job (watchable on the Activity screen): it
+downloads the archive for the host's OS/arch, verifies `checksums.txt` against
+a cosign signature (`checksums.txt.sig`) using a public key baked into the
+binary, verifies the archive against `checksums.txt`, swaps the executable in
+place (rolling back if the swap fails), then re-execs into the new binary about
+a second later. Under `systemd` the PID is unchanged; the web UI drops briefly
+and reloads on the new version. It only ever installs the latest release and
+never downgrades.
+
+Unavailable when:
+
+- the build is a dev build (`version == "dev"`),
+- it's running in a container (the Docker image sets `ABR_CONTAINER=1` — pull a
+  new image instead),
+- it was installed via `apt`/`dpkg` (use `apt` to upgrade),
+- the binary's directory is not writable.
+
+Script installs can also run `install.sh --update` (see above); `.deb` installs
+use `apt`.
+
 ### From source
 
 Requires Go 1.26+ and Node 20+.
@@ -153,6 +180,13 @@ Development (hot-reloading UI on :5173, API on :8674):
 go run ./cmd/audiobookrenamer
 cd web && npm run dev
 ```
+
+Release CI signs `checksums.txt` with a cosign key from the `COSIGN_PRIVATE_KEY`
+and `COSIGN_PASSWORD` repo secrets. The public half is committed at
+`internal/selfupdate/keys/cosign.pub` and compiled into the binary, which is
+what the web-UI updater checks against. Generate the keypair and register the
+secrets with `scripts/setup-signing-key.ps1` (run once, and again to rotate);
+CI fails the release if the committed public key does not match the signing key.
 
 ## Configuration
 
@@ -186,13 +220,19 @@ Changing the username or password signs out every existing session, as does
 turning auth off. Behind a TLS-terminating reverse proxy, forward
 `X-Forwarded-Proto` so the session cookie is marked `Secure`.
 
+With auth off, the self-update endpoint is reachable too, so anyone who can
+reach the port can trigger an update to the latest release; the cosign check
+limits that to genuine signed releases, but the trust boundary is the same as
+the rest of the API.
+
 ## API sketch
 
 `/api` — `libraries` CRUD + `/{id}/scan` + `/{id}/match`; `books` list/get +
 `PATCH /{id}` (hand-edit metadata) + `/{id}/candidates` + `/{id}/match`;
 `search`; `browse?path=` (folder picker); `organize/preview` +
 `organize/apply`; `jobs` + `/{id}/cancel` + `/{id}/undo` + `/stream` (SSE);
-`settings`; `auth/status|login|logout`; `healthz` (unauthenticated).
+`settings`; `update` (`GET /api/update` for status, `POST /api/update/apply`);
+`auth/status|login|logout`; `healthz` (unauthenticated, reports `version`).
 
 `browse` lists the folders inside a path on the **server**, which is what the
 library-root picker in the UI walks. A browser file input cannot supply a path
