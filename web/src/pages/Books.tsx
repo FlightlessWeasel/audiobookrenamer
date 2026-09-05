@@ -52,11 +52,6 @@ export function BooksPage() {
   const counts = books.data?.counts ?? {};
   const allBooks = useMemo(() => books.data?.books ?? [], [books.data?.books]);
 
-  const groups = useMemo(
-    () => groupBooks(allBooks, groupBy, libName),
-    [allBooks, groupBy, libName],
-  );
-
   // Multi-select for bulk delete. The set is pruned to the currently-listed
   // books whenever the list changes (a filter, a search, a reload), so a stale
   // id can never be sent to the delete endpoint.
@@ -99,6 +94,36 @@ export function BooksPage() {
     const ids = allBooks.map((b) => b.id);
     if (ids.length === 0) return;
     runTagCheck(() => refreshTagStatuses(ids));
+  }
+
+  // "Needs tagging" filter: books whose last tag check found their embedded
+  // tags out of date (the same state the "tags differ" badge shows). It can
+  // only act on books that have actually been checked, so toggling it on with
+  // nothing checked yet kicks off a check first.
+  const [needsTagOnly, setNeedsTagOnly] = useState(false);
+  const needsTagCount = useMemo(
+    () => allBooks.filter((b) => tagStatuses.get(b.id)?.match === "mismatch").length,
+    [allBooks, tagStatuses],
+  );
+  const visibleBooks = useMemo(
+    () =>
+      needsTagOnly
+        ? allBooks.filter((b) => tagStatuses.get(b.id)?.match === "mismatch")
+        : allBooks,
+    [allBooks, needsTagOnly, tagStatuses],
+  );
+
+  const groups = useMemo(
+    () => groupBooks(visibleBooks, groupBy, libName),
+    [visibleBooks, groupBy, libName],
+  );
+
+  function toggleNeedsTag() {
+    const next = !needsTagOnly;
+    setNeedsTagOnly(next);
+    if (next && tagStatuses.size === 0 && allBooks.length > 0 && !checkingTags) {
+      checkTags();
+    }
   }
 
   // Runs organize for every selected, retaggable book, one job per library
@@ -180,7 +205,7 @@ export function BooksPage() {
     });
   }
 
-  const allIds = allBooks.map((b) => b.id);
+  const allIds = visibleBooks.map((b) => b.id);
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
   const someSelected = allIds.some((id) => selected.has(id));
 
@@ -236,6 +261,19 @@ export function BooksPage() {
           className="rounded border border-slate-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-slate-700"
         >
           {checkingTags ? "Checking tags…" : "Check tags"}
+        </button>
+        <button
+          onClick={toggleNeedsTag}
+          disabled={allBooks.length === 0}
+          aria-pressed={needsTagOnly}
+          title="Show only books whose embedded tags the last check found out of date"
+          className={`rounded border px-2 py-1 text-xs disabled:opacity-50 ${
+            needsTagOnly
+              ? "border-amber-400 bg-amber-100 text-amber-800 dark:border-amber-500/60 dark:bg-amber-500/20 dark:text-amber-300"
+              : "border-slate-300 dark:border-slate-700"
+          }`}
+        >
+          Needs tagging{needsTagCount ? ` ${needsTagCount}` : ""}
         </button>
         {tagCheckErr && <span className="text-xs text-red-600">{tagCheckErr}</span>}
       </div>
@@ -378,7 +416,7 @@ export function BooksPage() {
                     </Fragment>
                   );
                 })
-              : allBooks.map((b: Book) => (
+              : visibleBooks.map((b: Book) => (
                   <BookRow
                     key={b.id}
                     book={b}
@@ -389,10 +427,16 @@ export function BooksPage() {
                     tagStatus={tagStatuses.get(b.id)}
                   />
                 ))}
-            {allBooks.length === 0 && (
+            {visibleBooks.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-3 py-6 text-center text-slate-500">
-                  No books. Add a library and run a scan.
+                  {needsTagOnly && allBooks.length > 0
+                    ? checkingTags
+                      ? "Checking tags…"
+                      : tagStatuses.size === 0
+                        ? "Run Check tags to find books that need tagging."
+                        : "No listed books have out-of-date tags."
+                    : "No books. Add a library and run a scan."}
                 </td>
               </tr>
             )}
@@ -532,6 +576,13 @@ function BookRow({
   onToggle: () => void;
   tagStatus?: TagStatus;
 }) {
+  const titleText = b.title || basename(b);
+  const sub = [b.subtitle, b.series && `${b.series}${b.series_index ? ` ${b.series_index}` : ""}`]
+    .filter(Boolean)
+    .join(" · ");
+  const relPath = libRelativePath(b.source_file || b.source_dir, libRoot(b.library_id));
+  const authorText = b.author || "—";
+  const libText = libName(b.library_id);
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-800/50">
       <td className="w-10 px-3 py-2">
@@ -542,23 +593,33 @@ function BookRow({
           onChange={onToggle}
         />
       </td>
-      <td className="px-3 py-2">
-        <Link to={`/books/${b.id}`} className="font-medium hover:underline">
-          {b.title || <span className="text-slate-400">{basename(b)}</span>}
+      <td className="max-w-[20rem] px-3 py-2">
+        <Link
+          to={`/books/${b.id}`}
+          title={titleText}
+          className={`block truncate font-medium hover:underline ${b.title ? "" : "text-slate-400"}`}
+        >
+          {titleText}
         </Link>
-        {(b.subtitle || b.series) && (
-          <div className="truncate text-xs text-slate-400">
-            {[b.subtitle, b.series && `${b.series}${b.series_index ? ` ${b.series_index}` : ""}`]
-              .filter(Boolean)
-              .join(" · ")}
+        {sub && (
+          <div className="truncate text-xs text-slate-400" title={sub}>
+            {sub}
           </div>
         )}
-        <div className="truncate text-xs text-slate-400">
-          {libRelativePath(b.source_file || b.source_dir, libRoot(b.library_id))}
+        <div className="truncate text-xs text-slate-400" title={relPath}>
+          {relPath}
         </div>
       </td>
-      <td className="px-3 py-2">{b.author || "—"}</td>
-      <td className="px-3 py-2">{libName(b.library_id)}</td>
+      <td className="px-3 py-2">
+        <div className="max-w-[12rem] truncate" title={b.author || undefined}>
+          {authorText}
+        </div>
+      </td>
+      <td className="px-3 py-2">
+        <div className="max-w-[10rem] truncate" title={libText}>
+          {libText}
+        </div>
+      </td>
       <td className="px-3 py-2">{b.layout}</td>
       <td className="px-3 py-2 whitespace-nowrap">
         {b.matched_provider ? (

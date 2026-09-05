@@ -346,6 +346,53 @@ describe("BooksPage tag status", () => {
     expect(tagStatusBody).toEqual({ ids: ["b1", "b2", "b3", "b4"] });
   });
 
+  it("filters to books with out-of-date tags when Needs tagging is toggled on", async () => {
+    mockFetch((path, init) => {
+      if (path === "/libraries") return { body: libs };
+      if (path === "/books/tag-status" && init?.method === "POST") {
+        const { ids } = JSON.parse(String(init.body)) as { ids: string[] };
+        return {
+          body: {
+            books: ids.map((id) => ({
+              id,
+              enabled: true,
+              match: id === "b1" || id === "b4" ? "mismatch" : "match",
+            })),
+          },
+        };
+      }
+      if (path.startsWith("/books")) return { body: { books, counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("link", { name: "Alpha" });
+
+    // Toggling the filter with nothing checked yet kicks off a tag check.
+    await user.click(screen.getByRole("button", { name: /needs tagging/i }));
+    await screen.findByRole("button", { name: "Needs tagging 2" });
+
+    expect(screen.getByRole("link", { name: "Alpha" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Delta" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Bravo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Charlie" })).not.toBeInTheDocument();
+
+    // Toggling back off restores the full list.
+    await user.click(screen.getByRole("button", { name: "Needs tagging 2" }));
+    expect(screen.getByRole("link", { name: "Charlie" })).toBeInTheDocument();
+  });
+
+  it("gives the title cell a tooltip so truncated titles stay readable", async () => {
+    mount();
+    const link = await screen.findByRole("link", { name: "Alpha" });
+    expect(link).toHaveAttribute("title", "Alpha");
+  });
+
   it("disables Check tags when there is nothing listed", async () => {
     mockFetch((path) => {
       if (path === "/libraries") return { body: libs };
