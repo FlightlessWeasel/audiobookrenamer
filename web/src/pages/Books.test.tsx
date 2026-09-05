@@ -143,6 +143,172 @@ describe("BooksPage bulk delete", () => {
   });
 });
 
+describe("BooksPage bulk retag", () => {
+  it("retags selected books via organize/apply, skipping unmatched ones, and re-checks their tags", async () => {
+    vi.stubGlobal("confirm", () => true);
+    const applyBodies: { library_id: string; book_ids: string[] }[] = [];
+    let tagStatusBody: unknown = null;
+    mockFetch((path, init) => {
+      if (path === "/libraries") return { body: libs };
+      if (path === "/organize/apply" && init?.method === "POST") {
+        applyBodies.push(JSON.parse(String(init.body)));
+        return { body: { id: "job1", type: "organize", status: "queued", total: 0, done: 0, created_at: "" } };
+      }
+      if (path === "/jobs/job1") {
+        return { body: { id: "job1", type: "organize", status: "done", total: 1, done: 1, created_at: "" } };
+      }
+      if (path === "/books/tag-status" && init?.method === "POST") {
+        tagStatusBody = JSON.parse(String(init.body));
+        const { ids } = tagStatusBody as { ids: string[] };
+        return { body: { books: ids.map((id) => ({ id, enabled: true, match: "match" })) } };
+      }
+      if (path.startsWith("/books")) return { body: { books, counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("link", { name: "Alpha" });
+
+    // b1 (L1, matched), b2 (L2, unmatched — must be skipped), b3 (L1, matched)
+    await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Bravo" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Charlie" }));
+    await user.click(screen.getByRole("button", { name: /retag selected/i }));
+
+    await screen.findByText(/retagged 2 books \(1 skipped — not matched\)\./i);
+    expect(applyBodies).toEqual([{ library_id: "L1", book_ids: ["b1", "b3"] }]);
+    expect(tagStatusBody).toEqual({ ids: ["b1", "b3"] });
+  });
+
+  it("groups a cross-library selection into one organize/apply call per library", async () => {
+    vi.stubGlobal("confirm", () => true);
+    const applyBodies: { library_id: string; book_ids: string[] }[] = [];
+    mockFetch((path, init) => {
+      if (path === "/libraries") return { body: libs };
+      if (path === "/organize/apply" && init?.method === "POST") {
+        applyBodies.push(JSON.parse(String(init.body)));
+        return {
+          body: { id: `job${applyBodies.length}`, type: "organize", status: "queued", total: 0, done: 0, created_at: "" },
+        };
+      }
+      if (path.startsWith("/jobs/job")) {
+        return {
+          body: { id: path.split("/").pop(), type: "organize", status: "done", total: 1, done: 1, created_at: "" },
+        };
+      }
+      if (path === "/books/tag-status" && init?.method === "POST") {
+        const { ids } = JSON.parse(String(init.body)) as { ids: string[] };
+        return { body: { books: ids.map((id) => ({ id, enabled: true, match: "match" })) } };
+      }
+      if (path.startsWith("/books")) return { body: { books, counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("link", { name: "Alpha" });
+
+    // b1 (L1, matched) and b4 (L2, matched) span two libraries.
+    await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Delta" }));
+    await user.click(screen.getByRole("button", { name: /retag selected/i }));
+
+    await screen.findByText("Retagged 2 books.");
+    expect(applyBodies).toEqual([
+      { library_id: "L1", book_ids: ["b1"] },
+      { library_id: "L2", book_ids: ["b4"] },
+    ]);
+    // The selection clears once the action settles, same as bulk delete.
+    expect(screen.getByRole("checkbox", { name: "Select Alpha" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Select Delta" })).not.toBeChecked();
+  });
+
+  it("reports book counts, not library counts, when one library's job fails and another succeeds", async () => {
+    vi.stubGlobal("confirm", () => true);
+    mockFetch((path, init) => {
+      if (path === "/libraries") return { body: libs };
+      if (path === "/organize/apply" && init?.method === "POST") {
+        const { library_id } = JSON.parse(String(init.body)) as { library_id: string };
+        return {
+          body: {
+            id: library_id === "L1" ? "job-ok" : "job-bad",
+            type: "organize",
+            status: "queued",
+            total: 0,
+            done: 0,
+            created_at: "",
+          },
+        };
+      }
+      if (path === "/jobs/job-ok") {
+        return { body: { id: "job-ok", type: "organize", status: "done", total: 1, done: 1, created_at: "" } };
+      }
+      if (path === "/jobs/job-bad") {
+        return {
+          body: { id: "job-bad", type: "organize", status: "failed", error: "disk full", total: 1, done: 0, created_at: "" },
+        };
+      }
+      if (path === "/books/tag-status" && init?.method === "POST") {
+        const { ids } = JSON.parse(String(init.body)) as { ids: string[] };
+        return { body: { books: ids.map((id) => ({ id, enabled: true, match: "match" })) } };
+      }
+      if (path.startsWith("/books")) return { body: { books, counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("link", { name: "Alpha" });
+
+    // b1 (L1, matched) and b3 (L1, matched) succeed; b4 (L2, matched) fails —
+    // 3 books total across 2 library jobs.
+    await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Charlie" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Delta" }));
+    await user.click(screen.getByRole("button", { name: /retag selected/i }));
+
+    // Book-level, not library-level: 2 of 3 books, not "1 of 2 libraries".
+    await screen.findByText("Retagged 2 of 3 books; 1 failed (disk full).");
+  });
+
+  it("does nothing when none of the selection is retaggable", async () => {
+    vi.stubGlobal("confirm", () => true);
+    const fetchFn = mockFetch((path) => {
+      if (path === "/libraries") return { body: libs };
+      if (path.startsWith("/books")) return { body: { books, counts: {} } };
+      return { status: 404, body: { error: "nope" } };
+    });
+
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <BooksPage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("link", { name: "Alpha" });
+
+    // b2 is unmatched — the only book selected.
+    await user.click(screen.getByRole("checkbox", { name: "Select Bravo" }));
+    await user.click(screen.getByRole("button", { name: /retag selected/i }));
+
+    await screen.findByText(/none of the selected books can be retagged/i);
+    expect(fetchFn.mock.calls.some(([u]) => String(u).endsWith("/organize/apply"))).toBe(false);
+  });
+});
+
 describe("BooksPage tag status", () => {
   it("posts every listed id to /books/tag-status and renders a badge per row", async () => {
     let tagStatusBody: unknown = null;

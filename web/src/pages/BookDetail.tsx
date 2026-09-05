@@ -11,7 +11,7 @@ import {
 } from "../api/client";
 import { useAction } from "../lib/useAction";
 import { useAsync } from "../lib/useAsync";
-import { statusLabel } from "../lib/status";
+import { canOrganizeBook, statusLabel } from "../lib/status";
 import { tagMatchBadgeClass, tagMatchLabel, tagStatusDetail } from "../lib/tagStatus";
 import { BookPlanCard, planHasRealMoves, planHasWork } from "../components/BookPlanCard";
 import { waitForJob } from "../lib/waitForJob";
@@ -265,7 +265,7 @@ function OrganizePanel({
   book: Book;
   onOrganized: () => void;
 }) {
-  const canOrganize = book.state === "matched" || book.state === "organized";
+  const canOrganize = canOrganizeBook(book.state);
   const [plan, setPlan] = useState<OrganizePlan | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const { run, isBusy, error, mounted } = useAction();
@@ -396,7 +396,7 @@ function OrganizePanel({
 function FilesSection({ book, onRetagged }: { book: Book; onRetagged?: () => void }) {
   const [status, setStatus] = useState<TagStatus | null>(null);
   const { run, isBusy, error, mounted } = useAction();
-  const canRetag = book.state === "matched" || book.state === "organized";
+  const canRetag = canOrganizeBook(book.state);
 
   function check() {
     run(async () => {

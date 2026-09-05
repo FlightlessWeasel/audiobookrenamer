@@ -4,7 +4,7 @@ import { client, type AcceptOutcome, type Book, type TagStatus } from "../api/cl
 import { useAction } from "../lib/useAction";
 import { useAsync } from "../lib/useAsync";
 import { useDebounced } from "../lib/useDebounced";
-import { statusBadgeClass, statusLabel } from "../lib/status";
+import { canOrganizeBook, statusBadgeClass, statusLabel } from "../lib/status";
 import { tagMatchBadgeClass, tagMatchLabel, tagStatusDetail } from "../lib/tagStatus";
 import {
   GROUP_OPTIONS,
@@ -15,6 +15,7 @@ import {
 import { useGroupBy } from "../lib/useGroupBy";
 import { formatScore, scoreClass } from "../lib/matchScore";
 import { TriStateCheckbox } from "../components/TriStateCheckbox";
+import { waitForJob } from "../lib/waitForJob";
 
 const STATES = ["unmatched", "needs_review", "matched", "organized", "error"] as const;
 
@@ -79,22 +80,88 @@ export function BooksPage() {
   const [tagStatuses, setTagStatuses] = useState<Map<string, TagStatus>>(new Map());
   const { run: runTagCheck, busy: checkingTags, error: tagCheckErr } = useAction();
 
+  // Shared by checkTags and retagSelected: a request can only carry
+  // MAX_TAG_CHECK ids, so this walks the full list in chunks rather than
+  // refusing to run at all above that count.
+  async function refreshTagStatuses(ids: string[]) {
+    for (let i = 0; i < ids.length; i += MAX_TAG_CHECK) {
+      const results = await client.tagStatus(ids.slice(i, i + MAX_TAG_CHECK));
+      if (!mounted.current) return;
+      setTagStatuses((prev) => {
+        const next = new Map(prev);
+        for (const r of results) next.set(r.id, r);
+        return next;
+      });
+    }
+  }
+
   function checkTags() {
     const ids = allBooks.map((b) => b.id);
     if (ids.length === 0) return;
-    runTagCheck(async () => {
-      // A library can easily list more books than one request is allowed to
-      // carry, so this walks the full list in MAX_TAG_CHECK-sized chunks
-      // rather than refusing to run at all above that count.
-      for (let i = 0; i < ids.length; i += MAX_TAG_CHECK) {
-        const results = await client.tagStatus(ids.slice(i, i + MAX_TAG_CHECK));
-        if (!mounted.current) return;
-        setTagStatuses((prev) => {
-          const next = new Map(prev);
-          for (const r of results) next.set(r.id, r);
-          return next;
-        });
+    runTagCheck(() => refreshTagStatuses(ids));
+  }
+
+  // Runs organize for every selected, retaggable book, one job per library
+  // (organize/apply is scoped to a single library): rewrites tags where the
+  // library has write_tags on and they differ, exactly what "Retag now" does
+  // for one book on the detail page.
+  const { run: runRetag, busy: retagging, error: retagErr } = useAction();
+  const [retagMsg, setRetagMsg] = useState<string | null>(null);
+
+  function retagSelected() {
+    const byID = new Map(allBooks.map((b) => [b.id, b]));
+    const ids = [...selected];
+    const eligible = ids.filter((id) => canOrganizeBook(byID.get(id)?.state));
+    const skipped = ids.length - eligible.length;
+    if (eligible.length === 0) {
+      setRetagMsg("None of the selected books can be retagged (only matched or organized books can be).");
+      return;
+    }
+    if (
+      !confirm(
+        `Retag ${eligible.length} book${eligible.length === 1 ? "" : "s"}` +
+          (skipped ? ` (${skipped} selected book${skipped === 1 ? "" : "s"} skipped — not matched)` : "") +
+          `?\n\nThis rewrites embedded tags for any of them whose library has tag writing on and whose tags differ.`,
+      )
+    ) {
+      return;
+    }
+    setRetagMsg(null);
+    runRetag(async () => {
+      const byLibrary = new Map<string, string[]>();
+      for (const id of eligible) {
+        const libraryId = byID.get(id)!.library_id;
+        const group = byLibrary.get(libraryId);
+        if (group) group.push(id);
+        else byLibrary.set(libraryId, [id]);
       }
+      const groups = [...byLibrary.entries()];
+      const jobs = await Promise.all(
+        groups.map(([libraryId, bookIds]) => client.organizeApply(libraryId, bookIds)),
+      );
+      const finals = await Promise.all(jobs.map((j) => waitForJob(j.id)));
+      if (!mounted.current) return;
+
+      books.reload();
+      await refreshTagStatuses(eligible);
+      if (!mounted.current) return;
+      setSelected(new Set());
+
+      // Each library's job is all-or-nothing, so a failed job's whole group of
+      // book ids failed with it — tallied in books, not libraries, to match
+      // every other count on this page (Deleted N, checked N ids, ...).
+      const failedGroups = groups.filter((_, i) => finals[i].status !== "done");
+      const failedBooks = failedGroups.reduce((n, [, bookIds]) => n + bookIds.length, 0);
+      const skippedNote = skipped ? ` (${skipped} skipped — not matched)` : "";
+      if (failedGroups.length === 0) {
+        setRetagMsg(`Retagged ${eligible.length} book${eligible.length === 1 ? "" : "s"}${skippedNote}.`);
+        return;
+      }
+      const firstFailed = finals[groups.findIndex(([libraryId]) => libraryId === failedGroups[0][0])];
+      throw new Error(
+        `Retagged ${eligible.length - failedBooks} of ${eligible.length} book${eligible.length === 1 ? "" : "s"}` +
+          `${skippedNote}; ${failedBooks} failed (${firstFailed.error || firstFailed.status}).`,
+      );
     });
   }
 
@@ -184,6 +251,16 @@ export function BooksPage() {
           />
           <span>{selected.size} selected</span>
         </label>
+        <button
+          onClick={retagSelected}
+          disabled={selected.size === 0 || retagging}
+          title="Rewrites embedded tags for the selected books wherever their library has tag writing on and the tags differ"
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium disabled:opacity-40 dark:border-slate-700"
+        >
+          {retagging ? "Retagging…" : "Retag selected"}
+        </button>
+        {retagMsg && <span className="text-xs text-slate-500">{retagMsg}</span>}
+        {retagErr && <span className="text-xs text-red-600">{retagErr}</span>}
         <button
           onClick={deleteSelected}
           disabled={selected.size === 0 || deleting}

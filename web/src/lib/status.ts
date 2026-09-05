@@ -37,3 +37,12 @@ export function statusLabel(status: string | null | undefined): string {
 export function statusBadgeClass(status: string | null | undefined): string {
   return (status != null && BADGE_CLASSES[status]) || FALLBACK_BADGE;
 }
+
+/**
+ * Whether a book in this state has accepted metadata to organize (move
+ * and/or retag) from. Only "matched" and "organized" books qualify — an
+ * unmatched, needs-review, or errored book has nothing to organize yet.
+ */
+export function canOrganizeBook(state: string | null | undefined): boolean {
+  return state === "matched" || state === "organized";
+}
