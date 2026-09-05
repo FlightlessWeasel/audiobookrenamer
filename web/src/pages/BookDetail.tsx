@@ -421,8 +421,13 @@ function FilesSection({ book, onRetagged }: { book: Book; onRetagged?: () => voi
     }, "retag");
   }
 
-  const tagsByFile = new Map((status?.files ?? []).map((f) => [f.file_rel, f]));
   const files = book.files ?? [];
+  // Zipped by index, not matched by path: TagFilePlan.file_rel is relative to
+  // the library root (so it lines up with an organize preview's FileMove),
+  // while BookFile.rel_path is relative to the book's own source_dir — the
+  // two are almost never equal strings for the same file. Both lists come
+  // from the same book_files query (ORDER BY track, rel_path), so index
+  // alignment is what BookPlanCard already relies on for this exact pairing.
 
   return (
     <div className="space-y-2">
@@ -473,8 +478,8 @@ function FilesSection({ book, onRetagged }: { book: Book; onRetagged?: () => voi
             </tr>
           </thead>
           <tbody>
-            {files.map((f) => {
-              const tf = tagsByFile.get(f.rel_path);
+            {files.map((f, idx) => {
+              const tf = status?.files?.[idx];
               return (
                 <tr key={f.id} className="border-t border-slate-100 dark:border-slate-800">
                   <td className="px-3 py-1.5 font-mono">{f.rel_path}</td>

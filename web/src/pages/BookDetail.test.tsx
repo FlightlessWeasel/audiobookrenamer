@@ -349,7 +349,12 @@ describe("BookDetail files table", () => {
                 id: "b1",
                 enabled: true,
                 match: "mismatch",
-                files: [{ file_rel: "Dune.m4b", writable: true, changed: true }],
+                // Deliberately NOT equal to book.files[0].rel_path ("Dune.m4b"):
+                // file_rel is library-root-relative while rel_path is relative
+                // to the book's own source_dir, so they are almost never the
+                // same string for a real book. Matching must zip by index, not
+                // by comparing these two path strings.
+                files: [{ file_rel: "Frank Herbert/Dune/Dune.m4b", writable: true, changed: true }],
               },
             ],
           },
