@@ -34,19 +34,23 @@ const defaultRepo = "FlightlessWeasel/audiobookrenamer"
 // else is ignored so a malformed value cannot be spliced into a request URL.
 var repoPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
 
-// redirectAllowedHosts are the only hosts a release-check or asset-download
-// redirect may land on. GitHub release downloads bounce through
-// objects.githubusercontent.com / codeload.github.com; anything else could feed
-// an attacker-controlled body into the (signature-unprotected) release check.
-var redirectAllowedHosts = map[string]bool{
-	"github.com":                    true,
-	"api.github.com":                true,
-	"objects.githubusercontent.com": true,
-	"codeload.github.com":           true,
+// redirectHostAllowed reports whether a redirect may land on host. GitHub is
+// the only origin we ever start from; it bounces release downloads through
+// changing CDN subdomains (objects., codeload., release-assets., ...) all under
+// githubusercontent.com, so allow that whole zone plus github.com rather than
+// hard-coding a list that breaks every time GitHub renames a host. The asset
+// payloads are cosign- and SHA-256-verified regardless of where they are
+// fetched from; this check exists mainly to keep the signature-unprotected
+// release-check response from being served by a non-GitHub host.
+func redirectHostAllowed(host string) bool {
+	host = strings.ToLower(host)
+	return host == "github.com" ||
+		strings.HasSuffix(host, ".github.com") ||
+		strings.HasSuffix(host, ".githubusercontent.com")
 }
 
 // checkRedirect rejects any redirect that leaves HTTPS or targets a host outside
-// redirectAllowedHosts, while keeping net/http's default 10-hop cap.
+// GitHub, while keeping net/http's default 10-hop cap.
 func checkRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
@@ -54,7 +58,7 @@ func checkRedirect(req *http.Request, via []*http.Request) error {
 	if req.URL.Scheme != "https" {
 		return fmt.Errorf("refusing redirect to non-https URL %q", req.URL.Redacted())
 	}
-	if !redirectAllowedHosts[req.URL.Hostname()] {
+	if !redirectHostAllowed(req.URL.Hostname()) {
 		return fmt.Errorf("refusing redirect to untrusted host %q", req.URL.Host)
 	}
 	return nil

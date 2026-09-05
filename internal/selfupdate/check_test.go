@@ -74,11 +74,13 @@ func TestCheckRedirect(t *testing.T) {
 		wantErr bool
 	}{
 		{"github asset host", "https://objects.githubusercontent.com/x", false},
+		{"release-assets host", "https://release-assets.githubusercontent.com/x", false},
 		{"api host", "https://api.github.com/repos/x", false},
 		{"codeload host", "https://codeload.github.com/x", false},
 		{"downgrade to http", "http://github.com/x", true},
 		{"foreign https host", "https://evil.example/x", true},
 		{"lookalike suffix", "https://github.com.evil.example/x", true},
+		{"githubusercontent lookalike", "https://githubusercontent.com.evil.example/x", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
